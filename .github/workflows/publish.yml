@@ -1,18 +1,22 @@
 name: Publish
 
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main, master]
 
 permissions:
-  id-token: write # Required for OIDC
-  contents: read
+  id-token: write # Required for OIDC npm publish
+  contents: write # Required for pushing version PR branch
+  pull-requests: write # Required for creating version PRs
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success'
 
     steps:
       - uses: actions/checkout@v4
