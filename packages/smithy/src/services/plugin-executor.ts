@@ -660,6 +660,11 @@ export class PluginExecutorImpl implements PluginExecutor {
       const timeoutHandle = setTimeout(() => {
         timedOut = true;
         child.kill('SIGTERM');
+        // Force kill after grace period in case SIGTERM is not forwarded
+        // (e.g., shell: true on some platforms doesn't propagate signals)
+        setTimeout(() => {
+          try { child.kill('SIGKILL'); } catch {}
+        }, 500);
       }, timeout);
 
       child.stdout?.on('data', (data) => {
