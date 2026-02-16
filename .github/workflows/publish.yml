@@ -4,6 +4,10 @@ on:
   push:
     branches: [main, master]
 
+permissions:
+  id-token: write # Required for OIDC
+  contents: read
+
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
@@ -33,4 +37,3 @@ jobs:
           version: pnpm changeset version
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

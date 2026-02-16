@@ -93,7 +93,7 @@ When a unit of work is complete and ready to go into master:
 pnpm changeset
 ```
 
-Select the affected packages, choose the bump level (`patch` for fixes, `minor` for features, `major` for breaking changes), and write a short summary of the change. Skip this step for test-only, docs-only, or CI-only changes.
+All packages are versioned together — always select **all** packages and use the same bump level (`patch` for fixes, `minor` for features, `major` for breaking changes). Write a short summary of the change. Skip this step for test-only, docs-only, or CI-only changes.
 
 4. Squash-merge into master:
 
