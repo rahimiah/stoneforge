@@ -13,8 +13,7 @@ dist/
 # Bun
 bun.lockb
 
-# Stoneforge workspace (local data, created by `sf init`)
-.stoneforge/
+# Legacy workspace directory
 .elemental/
 
 # Stoneforge test workspace (created by Playwright tests)
@@ -45,9 +44,6 @@ playwright-report/
 # Visual QA checkpoints
 checkpoints/
 
-# Worktrees are stored inside .stoneforge
-# (Note: .stoneforge/ is already ignored above, this is just for clarity)
-# /.stoneforge/.worktrees/
 
 OPENCODE_CONFIG_CONTENT
 

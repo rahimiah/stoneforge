@@ -70,11 +70,12 @@ identity:
   mode: soft
 `;
 
-const DEFAULT_GITIGNORE = `# Stoneforge gitignore
+const DEFAULT_GITIGNORE = `# Runtime data
 *.db
 *.db-journal
 *.db-wal
 *.db-shm
+daemon-state.json
 `;
 
 // ============================================================================

@@ -1,0 +1,16 @@
+# Runtime data (all projects)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+daemon-state.json
+
+# Workspace data (project-specific — most teams will want to commit JSONL)
+*.jsonl
+.worktrees/
+sync/
+uploads/
