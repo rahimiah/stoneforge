@@ -2,7 +2,8 @@
   "$schema": "https://unpkg.com/@changesets/config@3.1.2/schema.json",
   "changelog": "@changesets/cli/changelog",
   "commit": false,
-  "fixed": [
+  "fixed": [],
+  "linked": [
     [
       "@stoneforge/core",
       "@stoneforge/storage",
@@ -12,7 +13,6 @@
       "@stoneforge/shared-routes"
     ]
   ],
-  "linked": [],
   "access": "public",
   "baseBranch": "master",
   "updateInternalDependencies": "patch",
