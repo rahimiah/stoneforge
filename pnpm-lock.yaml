@@ -488,7 +488,7 @@ importers:
         specifier: workspace:*
         version: link:../shared-routes
       '@stoneforge/smithy':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../smithy
       '@stoneforge/storage':
         specifier: workspace:*
