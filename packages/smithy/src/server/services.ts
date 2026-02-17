@@ -21,7 +21,7 @@ import {
   createRoleDefinitionService,
   createWorkerTaskService,
   createStewardScheduler,
-  createDefaultStewardExecutor,
+  createStewardExecutor,
   createPluginExecutor,
   createDispatchDaemon,
   createAgentPoolService,
@@ -173,7 +173,11 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
     workspaceRoot: projectRoot,
   });
 
-  const stewardExecutor = createDefaultStewardExecutor();
+  const stewardExecutor = createStewardExecutor({
+    mergeStewardService,
+    healthStewardService,
+    docsStewardService,
+  });
   const stewardScheduler = createStewardScheduler(agentRegistry, stewardExecutor, {
     maxHistoryPerSteward: 100,
     defaultTimeoutMs: 5 * 60 * 1000,

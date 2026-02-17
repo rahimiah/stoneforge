@@ -34,6 +34,9 @@ import {
 } from '../types/index.js';
 import type { AgentRegistry, AgentEntity } from './agent-registry.js';
 import { getAgentMetadata } from './agent-registry.js';
+import type { MergeStewardService } from './merge-steward-service.js';
+import type { HealthStewardService } from './health-steward-service.js';
+import type { DocsStewardService } from './docs-steward-service.js';
 
 // ============================================================================
 // Types
@@ -1197,24 +1200,131 @@ export function createStewardScheduler(
 }
 
 // ============================================================================
-// Default Executor (placeholder)
+// Steward Executor Factory
 // ============================================================================
 
 /**
- * Creates a default steward executor that delegates to the appropriate
- * service based on the steward's focus.
+ * Dependencies required by the real steward executor.
+ */
+export interface StewardExecutorDeps {
+  mergeStewardService: MergeStewardService;
+  healthStewardService: HealthStewardService;
+  docsStewardService: DocsStewardService;
+}
+
+/**
+ * Creates a steward executor that dispatches to the appropriate service
+ * based on the steward's focus.
  *
- * This is a placeholder - the actual executor would integrate with:
- * - MergeStewardService for 'merge' focus
- * - HealthStewardService for 'health' focus (TB-O24)
- * - etc.
+ * - 'merge' focus → MergeStewardService.processAllPending()
+ * - 'health' focus → HealthStewardService.runHealthCheck()
+ * - 'docs' focus → DocsStewardService.scanAll()
+ * - 'reminder' / 'ops' → no-op (require agent sessions)
+ *
+ * Each case is wrapped in try/catch so one failing steward doesn't crash
+ * the scheduler.
+ */
+export function createStewardExecutor(deps: StewardExecutorDeps): StewardExecutor {
+  return async (steward, _context) => {
+    const metadata = getAgentMetadata(steward) as StewardMetadata;
+    const focus = metadata?.stewardFocus;
+    const startTime = Date.now();
+
+    switch (focus) {
+      case 'merge': {
+        try {
+          const result = await deps.mergeStewardService.processAllPending();
+          return {
+            success: true,
+            output: `Processed ${result.totalProcessed} tasks (${result.mergedCount} merged, ${result.errorCount} failed)`,
+            durationMs: Date.now() - startTime,
+            itemsProcessed: result.totalProcessed,
+          };
+        } catch (error) {
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+            output: `Merge steward '${steward.name}' failed: ${error instanceof Error ? error.message : String(error)}`,
+            durationMs: Date.now() - startTime,
+            itemsProcessed: 0,
+          };
+        }
+      }
+      case 'health': {
+        try {
+          const result = await deps.healthStewardService.runHealthCheck();
+          return {
+            success: true,
+            output: `Checked ${result.agentsChecked} agents, ${result.newIssues.length} new issues, ${result.actionsTaken.length} actions taken`,
+            durationMs: Date.now() - startTime,
+            itemsProcessed: result.agentsChecked,
+          };
+        } catch (error) {
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+            output: `Health steward '${steward.name}' failed: ${error instanceof Error ? error.message : String(error)}`,
+            durationMs: Date.now() - startTime,
+            itemsProcessed: 0,
+          };
+        }
+      }
+      case 'docs': {
+        try {
+          const result = await deps.docsStewardService.scanAll();
+          return {
+            success: true,
+            output: `Scanned docs: ${result.issues.length} issues found`,
+            durationMs: Date.now() - startTime,
+            itemsProcessed: result.issues.length,
+          };
+        } catch (error) {
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+            output: `Docs steward '${steward.name}' failed: ${error instanceof Error ? error.message : String(error)}`,
+            durationMs: Date.now() - startTime,
+            itemsProcessed: 0,
+          };
+        }
+      }
+      case 'reminder':
+      case 'ops':
+        // These focus types don't have dedicated services yet
+        return {
+          success: true,
+          output: `Steward focus '${focus}' has no automated service — requires agent session`,
+          durationMs: Date.now() - startTime,
+          itemsProcessed: 0,
+        };
+      default:
+        return {
+          success: false,
+          output: `Unknown steward focus: ${focus}`,
+          durationMs: Date.now() - startTime,
+          itemsProcessed: 0,
+        };
+    }
+  };
+}
+
+// ============================================================================
+// Default Executor (deprecated — use createStewardExecutor)
+// ============================================================================
+
+/**
+ * Creates a default steward executor that returns fake success without
+ * calling any real service. Useful for tests.
+ *
+ * @deprecated Use {@link createStewardExecutor} instead, which dispatches
+ * to real steward services based on the steward's focus.
  */
 export function createDefaultStewardExecutor(): StewardExecutor {
   return async (steward, _context) => {
     const metadata = getAgentMetadata(steward) as StewardMetadata;
     const focus = metadata?.stewardFocus;
 
-    // Placeholder - returns success with info about what would be done
+    // Stub - returns success with info about what would be done
     return {
       success: true,
       output: `Steward ${steward.name} (${focus}) executed successfully`,

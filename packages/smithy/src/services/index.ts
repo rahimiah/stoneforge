@@ -137,7 +137,9 @@ export {
   StewardSchedulerImpl,
   // Factory
   createStewardScheduler,
+  createStewardExecutor,
   createDefaultStewardExecutor,
+  type StewardExecutorDeps,
 } from './steward-scheduler.js';
 
 // Plugin executor service (TB-O23a)
