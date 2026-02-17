@@ -40,7 +40,7 @@ import {
 import type { TaskAssignmentService, TaskAssignment } from './task-assignment-service.js';
 import type { DispatchService } from './dispatch-service.js';
 import type { WorktreeManager } from '../git/worktree-manager.js';
-import { mergeBranch, syncLocalBranch } from '../git/merge.js';
+import { mergeBranch, syncLocalBranch, hasRemote } from '../git/merge.js';
 import type { AgentRegistry } from './agent-registry.js';
 
 const execAsync = promisify(exec);
@@ -499,10 +499,14 @@ export class MergeStewardServiceImpl implements MergeStewardService {
 
       // 6. Sync local target branch (best-effort, after all bookkeeping)
       const targetBranch = await this.getTargetBranch();
-      try {
-        await execAsync('git fetch origin', { cwd: this.config.workspaceRoot, encoding: 'utf8' });
-      } catch { /* best-effort */ }
-      await syncLocalBranch(this.config.workspaceRoot, targetBranch);
+      const remoteExists = await hasRemote(this.config.workspaceRoot);
+      if (remoteExists) {
+        try {
+          await execAsync('git fetch origin', { cwd: this.config.workspaceRoot, encoding: 'utf8' });
+        } catch { /* best-effort */ }
+        await syncLocalBranch(this.config.workspaceRoot, targetBranch);
+      }
+      // In local-only mode, syncLocalBranch is handled by mergeBranch() itself
 
       return {
         taskId,
@@ -843,9 +847,11 @@ export class MergeStewardServiceImpl implements MergeStewardService {
     }
 
     try {
+      // Only attempt remote branch deletion when a remote actually exists
+      const remoteExists = await hasRemote(this.config.workspaceRoot);
       await this.worktreeManager.removeWorktree(orchestratorMeta.worktree, {
         deleteBranch,
-        deleteRemoteBranch: deleteBranch, // Delete remote branch when deleting local
+        deleteRemoteBranch: deleteBranch && remoteExists,
         force: false,
       });
       return true;
