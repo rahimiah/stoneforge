@@ -157,7 +157,7 @@ const agentListOptions: CommandOption[] = [
   {
     name: 'focus',
     short: 'f',
-    description: 'Filter by steward focus (merge, docs)',
+    description: 'Filter by steward focus (merge, docs, custom)',
     hasValue: true,
   },
   {
@@ -300,7 +300,7 @@ Options:
   -r, --role <role>        Filter by role (director, worker, steward)
   -s, --status <status>    Filter by session status (idle, running, suspended, terminated)
   -m, --workerMode <mode>  Filter by worker mode (ephemeral, persistent)
-  -f, --focus <focus>      Filter by steward focus (merge, docs)
+  -f, --focus <focus>      Filter by steward focus (merge, docs, custom)
   --reportsTo <id>         Filter by manager entity ID
   --hasSession             Filter to agents with active sessions
 
@@ -424,7 +424,7 @@ const agentRegisterOptions: CommandOption[] = [
   {
     name: 'focus',
     short: 'f',
-    description: 'Steward focus (merge, docs)',
+    description: 'Steward focus (merge, docs, custom)',
     hasValue: true,
   },
   {
@@ -600,7 +600,7 @@ Arguments:
 Options:
   -r, --role <role>       Agent role: director, worker, steward (required)
   -m, --mode <mode>       Worker mode: ephemeral, persistent (default: ephemeral)
-  -f, --focus <focus>     Steward focus: merge, docs
+  -f, --focus <focus>     Steward focus: merge, docs, custom
   -t, --maxTasks <n>      Maximum concurrent tasks (default: 1)
   --tags <tags>           Comma-separated tags (e.g., "frontend,urgent")
   --reportsTo <id>        Manager entity ID (for workers/stewards)

@@ -740,6 +740,7 @@ function StewardsTab({ stewards, onStart, onStop, onOpenTerminal, onRename, onDe
   const focusLabels: Record<string, string> = {
     merge: 'Merge Stewards',
     docs: 'Docs Stewards',
+    custom: 'Custom Stewards',
   };
 
   return (

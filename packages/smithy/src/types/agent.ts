@@ -4,7 +4,7 @@
  * This module defines the core types for agents in the Stoneforge Smithy:
  * - AgentRole: The primary role classification (director, steward, worker)
  * - WorkerMode: Whether a worker is ephemeral (short-lived) or persistent
- * - StewardFocus: The specialty area for steward agents (merge, docs)
+ * - StewardFocus: The specialty area for steward agents (merge, docs, custom)
  * - StewardTrigger: How stewards are activated (cron or event)
  *
  * Agents are stored as Entity elements with additional metadata in their
@@ -21,7 +21,7 @@ import type { EntityId, ChannelId, Timestamp, ElementId } from '@stoneforge/core
  * The primary role classification for agents in the orchestration system.
  *
  * - `director`: Strategic agent that creates and assigns tasks, reports to Human
- * - `steward`: Support agent that performs maintenance tasks (merge, docs)
+ * - `steward`: Support agent that performs maintenance tasks (merge, docs, custom)
  * - `worker`: Execution agent that produces code and completes tasks
  */
 export type AgentRole = 'director' | 'steward' | 'worker';

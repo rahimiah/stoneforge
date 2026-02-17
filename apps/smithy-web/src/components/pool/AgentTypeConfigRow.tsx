@@ -85,6 +85,7 @@ export const workerModeLabels: Record<string, string> = {
 export const stewardFocusLabels: Record<string, string> = {
   merge: 'Merge',
   docs: 'Docs',
+  custom: 'Custom',
 };
 
 export const defaultFormState: FormState = {
