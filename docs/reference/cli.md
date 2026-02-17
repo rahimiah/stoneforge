@@ -209,14 +209,16 @@ sf document reindex
 
 Update a document's content, creating a new version. Documents are versioned - each update preserves history.
 
-| Option                 | Description                |
-| ---------------------- | -------------------------- |
-| `-c, --content <text>` | New content (inline)       |
-| `-f, --file <path>`    | Read new content from file |
+| Option                    | Description                       |
+| ------------------------- | --------------------------------- |
+| `-c, --content <text>`    | New content (inline)              |
+| `-f, --file <path>`       | Read new content from file        |
+| `-m, --metadata <json>`   | JSON metadata to merge            |
 
 ```bash
 sf document update el-doc123 --content "New content here"
 sf document update el-doc123 --file path/to/updated.md
+sf document update el-doc123 --metadata '{"reviewer": "alice"}'
 ```
 
 ## Embeddings Commands
@@ -452,6 +454,44 @@ sf --from bot message reply el-msg123 -m "Automated response"
 | `sf team remove <team> <entity>` | Remove member |
 | `sf team members <id>`           | List members  |
 
+## Library Commands
+
+| Command                              | Description                      |
+| ------------------------------------ | -------------------------------- |
+| `sf library create`                  | Create a new library             |
+| `sf library list`                    | List libraries                   |
+| `sf library roots`                   | List root libraries              |
+| `sf library docs <id>`              | List documents in a library      |
+| `sf library stats <id>`             | Show library statistics          |
+| `sf library add <lib> <doc>`        | Add document to library          |
+| `sf library remove <lib> <doc>`     | Remove document from library     |
+| `sf library nest <child> <parent>`  | Nest a library under another     |
+| `sf library delete <id>`            | Delete a library                 |
+
+```bash
+# Create a library
+sf library create --name "API Documentation"
+sf library create -n "Design Docs" --tag design --tag frontend
+
+# List all libraries
+sf library list
+
+# List root libraries (not nested)
+sf library roots
+
+# Manage documents in a library
+sf library add el-lib123 el-doc456
+sf library remove el-lib123 el-doc456
+sf library docs el-lib123
+
+# Create hierarchy
+sf library nest el-sub123 el-parent456
+
+# Delete
+sf library delete el-lib123
+sf library delete el-lib123 --force
+```
+
 ## Playbook Commands
 
 | Command                       | Description    |
@@ -525,6 +565,53 @@ sf doctor -v
 sf migrate --dry-run
 ```
 
+## GC Commands
+
+| Command             | Description                        |
+| ------------------- | ---------------------------------- |
+| `sf gc workflows`   | Garbage collect ephemeral workflows|
+| `sf gc tasks`       | _(deprecated, no-op)_              |
+
+```bash
+# Garbage collect old workflows (default: 1 day old)
+sf gc workflows
+
+# Custom age threshold
+sf gc workflows --age 7
+
+# Preview what would be deleted
+sf gc workflows --dry-run
+
+# Limit number of deletions
+sf gc workflows --limit 10
+```
+
+**Note:** Only workflows in a terminal state (completed, failed, cancelled) are eligible. Deleting a workflow also deletes all tasks that belong to it.
+
+## Reset Command
+
+| Command    | Description                 |
+| ---------- | --------------------------- |
+| `sf reset` | Reset a Stoneforge workspace |
+
+| Option       | Description                                |
+| ------------ | ------------------------------------------ |
+| `-f, --force` | Skip confirmation prompt                   |
+| `--full`      | Delete everything and reinitialize         |
+
+```bash
+# Reset workspace (preserves config)
+sf reset
+
+# Skip confirmation
+sf reset --force
+
+# Full reset (deletes .stoneforge and reinitializes)
+sf reset --full --force
+```
+
+**Default reset** removes the database, sync files, uploads, and worktrees but preserves `.stoneforge/config.yaml`. **Full reset** deletes the entire `.stoneforge/` folder and reinitializes.
+
 ## History Command
 
 ```bash
@@ -536,6 +623,7 @@ Options:
   --after <date>     Events after date
   --before <date>    Events before date
   --format <fmt>     Output format (timeline/table)
+  -l, --limit <n>    Maximum number of events to return
 ```
 
 ## CLI Plugins
@@ -607,7 +695,7 @@ List registered agents with optional filters.
 | `-r, --role <role>`       | Filter by role: director, worker, steward                      |
 | `-s, --status <status>`   | Filter by session status: idle, running, suspended, terminated |
 | `-m, --workerMode <mode>` | Filter by worker mode: ephemeral, persistent                   |
-| `-f, --focus <focus>`     | Filter by steward focus: merge, docs                           |
+| `-f, --focus <focus>`     | Filter by steward focus: merge, docs, custom                   |
 | `--reportsTo <id>`        | Filter by manager entity ID                                    |
 | `--hasSession`            | Filter to agents with active sessions                          |
 
@@ -628,7 +716,7 @@ Register a new orchestrator agent.
 | --------------------- | ------------------------------------------------------- |
 | `-r, --role <role>`   | Agent role: director, worker, steward (required)        |
 | `-m, --mode <mode>`   | Worker mode: ephemeral, persistent (default: ephemeral) |
-| `-f, --focus <focus>` | Steward focus: merge, docs                              |
+| `-f, --focus <focus>` | Steward focus: merge, docs, custom                      |
 | `-t, --maxTasks <n>`  | Maximum concurrent tasks (default: 1)                   |
 | `--tags <tags>`       | Comma-separated tags                                    |
 | `--reportsTo <id>`    | Manager entity ID (for workers/stewards)                |
@@ -710,7 +798,6 @@ sf agent stream el-abc123
 | Command                      | Description                            |
 | ---------------------------- | -------------------------------------- |
 | `sf dispatch <task> <agent>` | Dispatch task to specific agent        |
-| `sf dispatch smart <task>`   | Smart dispatch to best available agent |
 
 | Option                  | Description                             |
 | ----------------------- | --------------------------------------- |
@@ -728,12 +815,6 @@ sf dispatch el-task123 el-agent1 --branch feature/my-task
 
 # Dispatch and mark as started
 sf dispatch el-task123 el-agent1 --markAsStarted
-
-# Smart dispatch (auto-select best agent)
-sf dispatch smart el-task123
-
-# Smart dispatch with options
-sf dispatch smart el-task123 --branch feature/task
 ```
 
 ### Pool Commands
@@ -851,6 +932,28 @@ Refresh the status of all agent pools based on current sessions.
 
 ```bash
 sf pool refresh
+```
+
+---
+
+### Daemon Commands
+
+| Command            | Description              |
+| ------------------ | ------------------------ |
+| `sf daemon start`  | Start the dispatch daemon |
+| `sf daemon stop`   | Stop the dispatch daemon  |
+| `sf daemon status` | Show daemon status        |
+
+| Option                 | Description                                            |
+| ---------------------- | ------------------------------------------------------ |
+| `-s, --server <url>`   | Orchestrator server URL (default: http://localhost:3456)|
+| `-f, --force`          | Skip confirmation (for stop)                           |
+
+```bash
+sf daemon start
+sf daemon status
+sf daemon stop
+sf daemon stop --force
 ```
 
 ---

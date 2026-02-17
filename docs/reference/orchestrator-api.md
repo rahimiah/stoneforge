@@ -185,30 +185,61 @@ type AgentRole = 'director' | 'worker' | 'steward';
 
 ### AgentMetadata
 
+Agent metadata is a discriminated union based on `agentRole`:
+
 ```typescript
-interface AgentMetadata {
-  role: AgentRole;
-  workerMode?: 'ephemeral' | 'persistent';
-  stewardFocus?: 'merge' | 'docs' | 'custom';
-  maxConcurrentTasks?: number;  // Default: 1
-  sessionState?: SessionState;
-  currentSessionId?: string;
+interface BaseAgentMetadata {
+  agentRole: AgentRole;
   channelId?: ChannelId;
-  reportsTo?: EntityId;
+  sessionId?: string;
+  worktree?: string;
+  sessionStatus?: 'idle' | 'running' | 'suspended' | 'terminated';
+  lastActivityAt?: Timestamp;
+  maxConcurrentTasks?: number;  // Default: 1
   roleDefinitionRef?: ElementId;
-  triggers?: StewardTrigger[];
+  provider?: string;
+  model?: string;
 }
+
+interface DirectorMetadata extends BaseAgentMetadata {
+  agentRole: 'director';
+}
+
+interface WorkerMetadata extends BaseAgentMetadata {
+  agentRole: 'worker';
+  workerMode: WorkerMode;
+  branch?: string;
+}
+
+interface StewardMetadata extends BaseAgentMetadata {
+  agentRole: 'steward';
+  stewardFocus: StewardFocus;
+  triggers?: StewardTrigger[];
+  playbook?: string;          // For 'custom' stewards
+  lastExecutedAt?: Timestamp;
+  nextScheduledAt?: Timestamp;
+}
+
+type AgentMetadata = DirectorMetadata | WorkerMetadata | StewardMetadata;
 ```
 
 ### StewardTrigger
 
+Steward triggers are a union of `CronTrigger` and `EventTrigger`:
+
 ```typescript
-interface StewardTrigger {
-  type: 'cron' | 'event' | 'condition';
-  cron?: string;           // For cron type
-  event?: string;          // For event type
-  condition?: string;      // For condition type
+interface CronTrigger {
+  type: 'cron';
+  schedule: string;          // Cron expression (e.g., "0 2 * * *")
 }
+
+interface EventTrigger {
+  type: 'event';
+  event: string;             // Event name (e.g., "task_completed")
+  condition?: string;        // Optional condition expression
+}
+
+type StewardTrigger = CronTrigger | EventTrigger;
 ```
 
 ---
@@ -217,18 +248,23 @@ interface StewardTrigger {
 
 ```typescript
 import {
-  isDirector,
-  isWorker,
-  isSteward,
-  isEphemeralWorker,
-  isPersistentWorker,
+  isDirectorMetadata,
+  isWorkerMetadata,
+  isStewardMetadata,
 } from '@stoneforge/smithy';
 
-if (isWorker(agent)) {
+// Check metadata discriminated union
+if (isWorkerMetadata(agent.metadata.agent)) {
   console.log(agent.metadata.agent.workerMode);
 }
 
-if (isEphemeralWorker(agent)) {
-  // Ephemeral worker specific logic
+if (isStewardMetadata(agent.metadata.agent)) {
+  console.log(agent.metadata.agent.stewardFocus);
 }
+```
+
+Additional type guards for triggers:
+
+```typescript
+import { isCronTrigger, isEventTrigger, isStewardTrigger } from '@stoneforge/smithy';
 ```

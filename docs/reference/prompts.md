@@ -23,7 +23,8 @@ packages/smithy/src/prompts/
 ├── message-triage.md     # Message triage prompt (used by triage sessions)
 ├── steward-base.md       # Base steward prompt
 ├── steward-merge.md      # Merge focus addendum
-└── steward-docs.md       # Docs focus addendum
+├── steward-docs.md       # Docs focus addendum
+└── steward-recovery.md   # Recovery focus addendum (not registered in PROMPT_FILES)
 ```
 
 ## Loading Prompts
@@ -261,8 +262,9 @@ const result = await spawner.spawn(agentId, 'worker', {
 |-------|------|---------|
 | `merge` | `steward-merge.md` | Merge completed branches |
 | `docs` | `steward-docs.md` | Scan and fix documentation issues |
+| `custom` | _(user-provided playbook)_ | User-defined steward behavior |
 
-Steward prompts are combined: `steward-base.md` + `steward-{focus}.md`
+Steward prompts are combined: `steward-base.md` + `steward-{focus}.md`. Custom stewards use the base prompt plus a user-provided playbook stored in their metadata.
 
 ## Agent Identity in Prompts
 

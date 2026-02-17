@@ -79,40 +79,40 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for full architecture details.
 
 | Concept | Source | Tests |
 |---------|--------|-------|
-| Task type | `types/task.ts` | `types/task.test.ts` |
-| Entity type | `types/entity.ts` | `types/entity.test.ts` |
-| Message type | `types/message.ts` | `types/message.test.ts` |
-| Document type | `types/document.ts` | `types/document.test.ts` |
-| Plan type | `types/plan.ts` | `types/plan.test.ts` |
-| Workflow type | `types/workflow.ts` | `types/workflow.test.ts` |
-| Channel type | `types/channel.ts` | `types/channel.test.ts` |
-| Dependency type | `types/dependency.ts` | `types/dependency.test.ts` |
-| Event type | `types/event.ts` | `types/event.test.ts` |
-| Inbox type | `types/inbox.ts` | `types/inbox.test.ts` |
-| ID generator | `id/generator.ts` | `id/generator.test.ts` |
-| Error codes | `errors/codes.ts` | `errors/codes.test.ts` |
+| Task type | `types/task.ts` | `types/task.bun.test.ts` |
+| Entity type | `types/entity.ts` | `types/entity.bun.test.ts` |
+| Message type | `types/message.ts` | `types/message.bun.test.ts` |
+| Document type | `types/document.ts` | `types/document.bun.test.ts` |
+| Plan type | `types/plan.ts` | `types/plan.bun.test.ts` |
+| Workflow type | `types/workflow.ts` | `types/workflow.bun.test.ts` |
+| Channel type | `types/channel.ts` | `types/channel.bun.test.ts` |
+| Dependency type | `types/dependency.ts` | `types/dependency.bun.test.ts` |
+| Event type | `types/event.ts` | `types/event.bun.test.ts` |
+| Inbox type | `types/inbox.ts` | `types/inbox.bun.test.ts` |
+| ID generator | `id/generator.ts` | `id/generator.bun.test.ts` |
+| Error codes | `errors/codes.ts` | `errors/codes.bun.test.ts` |
 
 ## File Map (@stoneforge/quarry)
 
 | Concept | Source | Tests |
 |---------|--------|-------|
-| QuarryAPI | `api/quarry-api.ts` | `api/*.integration.test.ts` |
-| Dependency service | `services/dependency.ts` | `services/dependency.test.ts` |
-| Blocked cache | `services/blocked-cache.ts` | `services/blocked-cache.test.ts` |
-| Inbox service | `services/inbox.ts` | `services/inbox.test.ts` |
-| Priority service | `services/priority-service.ts` | `services/priority-service.test.ts` |
-| ID length cache | `services/id-length-cache.ts` | `services/id-length-cache.test.ts` |
-| Search utils | `services/search-utils.ts` | `services/search-utils.test.ts` |
-| Embedding service | `services/embeddings/service.ts` | `services/embeddings/service.test.ts` |
+| QuarryAPI | `api/quarry-api.ts` | `api/*.integration.bun.test.ts` |
+| Dependency service | `services/dependency.ts` | `services/dependency.bun.test.ts` |
+| Blocked cache | `services/blocked-cache.ts` | `services/blocked-cache.bun.test.ts` |
+| Inbox service | `services/inbox.ts` | `services/inbox.bun.test.ts` |
+| Priority service | `services/priority-service.ts` | `services/priority-service.bun.test.ts` |
+| ID length cache | `services/id-length-cache.ts` | `services/id-length-cache.bun.test.ts` |
+| Search utils | `services/search-utils.ts` | `services/search-utils.bun.test.ts` |
+| Embedding service | `services/embeddings/service.ts` | `services/embeddings/service.bun.test.ts` |
 | Embedding types | `services/embeddings/types.ts` | - |
-| Local embedding provider | `services/embeddings/local-provider.ts` | `services/embeddings/local-provider.test.ts` |
-| Rank fusion | `services/embeddings/fusion.ts` | `services/embeddings/fusion.test.ts` |
-| Sync service | `sync/service.ts` | `sync/service.test.ts` |
+| Local embedding provider | `services/embeddings/local-provider.ts` | `services/embeddings/local-provider.bun.test.ts` |
+| Rank fusion | `services/embeddings/fusion.ts` | `services/embeddings/fusion.bun.test.ts` |
+| Sync service | `sync/service.ts` | `sync/service.bun.test.ts` |
 | Sync merge | `sync/merge.ts` | - |
 | Sync hash | `sync/hash.ts` | - |
-| Config loader | `config/config.ts` | `config/config.test.ts` |
-| Identity system | `systems/identity.ts` | `systems/identity.test.ts` |
-| CLI commands | `cli/commands/*.ts` | `cli/commands/*.test.ts` |
+| Config loader | `config/config.ts` | `config/config.bun.test.ts` |
+| Identity system | `systems/identity.ts` | `systems/identity.bun.test.ts` |
+| CLI commands | `cli/commands/*.ts` | `cli/commands/*.bun.test.ts` |
 | CLI embeddings commands | `cli/commands/embeddings.ts` | - |
 
 ## File Map (@stoneforge/ui)
@@ -162,28 +162,29 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for full architecture details.
 
 | Concept | Source | Tests |
 |---------|--------|-------|
-| OrchestratorAPI | `api/orchestrator-api.ts` | `api/*.integration.test.ts` |
-| Agent registry | `services/agent-registry.ts` | `services/agent-registry.test.ts` |
-| Role definition service | `services/role-definition-service.ts` | `services/role-definition-service.test.ts` |
-| Task assignment service | `services/task-assignment-service.ts` | `services/task-assignment-service.test.ts` |
-| Dispatch service | `services/dispatch-service.ts` | `services/dispatch-service.test.ts` |
-| Dispatch daemon | `services/dispatch-daemon.ts` | `services/dispatch-daemon.test.ts` |
+| OrchestratorAPI | `api/orchestrator-api.ts` | `api/*.integration.bun.test.ts` |
+| Agent registry | `services/agent-registry.ts` | `services/agent-registry.bun.test.ts` |
+| Role definition service | `services/role-definition-service.ts` | `services/role-definition-service.bun.test.ts` |
+| Task assignment service | `services/task-assignment-service.ts` | `services/task-assignment-service.bun.test.ts` |
+| Dispatch service | `services/dispatch-service.ts` | `services/dispatch-service.bun.test.ts` |
+| Dispatch daemon | `services/dispatch-daemon.ts` | `services/dispatch-daemon.bun.test.ts` |
 | Worker task service | `services/worker-task-service.ts` | `services/worker-task-service.test.ts` |
 | Merge steward service | `services/merge-steward-service.ts` | `services/merge-steward-service.test.ts` |
-| Docs steward service | `services/docs-steward-service.ts` | - |
+| Docs steward service | `services/docs-steward-service.ts` | `services/docs-steward-service.test.ts` |
+| Agent pool service | `services/agent-pool-service.ts` | - |
+| Merge request provider | `services/merge-request-provider.ts` | - |
 | Steward scheduler | `services/steward-scheduler.ts` | `services/steward-scheduler.test.ts` |
-| Plugin executor | `services/plugin-executor.ts` | `services/plugin-executor.test.ts` |
-| Spawner service | `runtime/spawner.ts` | `runtime/spawner.test.ts` |
-| Session manager | `runtime/session-manager.ts` | `runtime/session-manager.test.ts` |
-| Handoff service | `runtime/handoff.ts` | `runtime/handoff.test.ts` |
+| Plugin executor | `services/plugin-executor.ts` | `services/plugin-executor.bun.test.ts` |
+| Spawner service | `runtime/spawner.ts` | `runtime/spawner.bun.test.ts` |
+| Session manager | `runtime/session-manager.ts` | `runtime/session-manager.bun.test.ts` |
+| Handoff service | `runtime/handoff.ts` | `runtime/handoff.bun.test.ts` |
 | Message mapper | `runtime/message-mapper.ts` | - |
-| Prompts | `prompts/index.ts` | `prompts/index.test.ts` |
+| Prompts | `prompts/index.ts` | `prompts/index.bun.test.ts` |
 | Persistent worker prompt | `prompts/persistent-worker.md` | - |
 | Message triage prompt | `prompts/message-triage.md` | - |
 | Docs steward prompt | `prompts/steward-docs.md` | - |
-| Merge CLI command | `cli/commands/merge.ts` | `cli/commands/merge.test.ts` |
-| Worktree manager | `git/worktree-manager.ts` | `git/worktree-manager.test.ts` |
-| Docs steward service | `services/docs-steward-service.ts` | `services/docs-steward-service.test.ts` |
+| Merge CLI command | `cli/commands/merge.ts` | `cli/commands/merge.bun.test.ts` |
+| Worktree manager | `git/worktree-manager.ts` | `git/worktree-manager.bun.test.ts` |
 
 ## File Map (Platform)
 

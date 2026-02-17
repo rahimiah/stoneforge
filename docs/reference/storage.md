@@ -275,16 +275,16 @@ await syncService.import(jsonlPath, { force: true });
 ```typescript
 import {
   serializeElement,
-  deserializeElement,
+  parseElement,
   serializeDependency,
-  deserializeDependency,
+  parseDependency,
 } from '@stoneforge/quarry';
 
 // Element → JSON string
 const json = serializeElement(element);
 
 // JSON string → Element
-const element = deserializeElement(json);
+const element = parseElement(json);
 ```
 
 ### SerializedElement
@@ -358,26 +358,26 @@ const merged = mergeElements(local, remote, options);
 ### Bun Backend
 
 ```typescript
-import { BunBackend } from '@stoneforge/storage/bun-backend';
+import { BunStorageBackend } from '@stoneforge/storage/bun-backend';
 
-const backend = new BunBackend('./db.sqlite');
+const backend = new BunStorageBackend('./db.sqlite');
 ```
 
 ### Node Backend
 
 ```typescript
-import { NodeBackend } from '@stoneforge/storage/node-backend';
+import { NodeStorageBackend } from '@stoneforge/storage/node-backend';
 
-const backend = new NodeBackend('./db.sqlite');
+const backend = new NodeStorageBackend('./db.sqlite');
 ```
 
 ### Browser Backend
 
 ```typescript
-import { BrowserBackend } from '@stoneforge/storage/browser-backend';
+import { BrowserStorageBackend } from '@stoneforge/storage/browser-backend';
 
 // Uses OPFS (Origin Private File System)
-const backend = await BrowserBackend.create('./db.sqlite');
+const backend = await BrowserStorageBackend.create('./db.sqlite');
 ```
 
 ---
