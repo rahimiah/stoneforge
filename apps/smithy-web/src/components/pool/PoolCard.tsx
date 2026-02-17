@@ -48,7 +48,7 @@ export function PoolCard({ pool, onToggleEnabled, onEdit, onDelete, isUpdating }
           >
             <MoreHorizontal className="w-4 h-4" />
           </button>
-          <div className="absolute right-0 top-full mt-1 w-40 py-1 bg-[var(--color-surface-elevated)] border border-[var(--color-border)] rounded-md shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 z-10">
+          <div className="absolute right-0 top-full mt-1 w-40 py-1 bg-[var(--color-surface-elevated)] border border-[var(--color-border)] rounded-md shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 z-20">
             {onToggleEnabled && (
               <button
                 onClick={() => onToggleEnabled(!config.enabled)}

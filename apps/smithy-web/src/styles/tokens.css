@@ -129,6 +129,7 @@
   --color-surface-hover: #f9fafb;
   --color-surface-active: #f3f4f6;
   --color-surface-selected: #eff6ff;
+  --color-surface-elevated: #ffffff;
 
   /* --- Sidebar specific (Light Mode) --- */
   --color-sidebar-bg: #ffffff;
@@ -208,6 +209,7 @@
   --color-surface-hover: #1f1f1f;
   --color-surface-active: #262626;
   --color-surface-selected: #1e3a5f;
+  --color-surface-elevated: #1f1f1f;
 
   /* --- Sidebar specific (Dark Mode) --- */
   --color-sidebar-bg: #0d0d0d;
@@ -428,6 +430,7 @@
   --color-surface-hover: #f0f0f0;
   --color-surface-active: #e0e0e0;
   --color-surface-selected: #cce5ff;
+  --color-surface-elevated: #ffffff;
 
   /* --- Sidebar specific (High Contrast Light) --- */
   --color-sidebar-bg: #ffffff;
@@ -512,6 +515,7 @@
   --color-surface-hover: #1a1a1a;
   --color-surface-active: #2a2a2a;
   --color-surface-selected: #003366;
+  --color-surface-elevated: #1a1a1a;
 
   /* --- Sidebar specific (High Contrast Dark) --- */
   --color-sidebar-bg: #000000;
