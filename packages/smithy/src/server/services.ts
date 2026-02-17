@@ -25,6 +25,9 @@ import {
   createPluginExecutor,
   createDispatchDaemon,
   createAgentPoolService,
+  createMergeStewardService,
+  createHealthStewardService,
+  createDocsStewardService,
   GitRepositoryNotFoundError,
   type OrchestratorAPI,
   type AgentRegistry,
@@ -39,6 +42,9 @@ import {
   type PluginExecutor,
   type DispatchDaemon,
   type AgentPoolService,
+  type MergeStewardService,
+  type HealthStewardService,
+  type DocsStewardService,
   type OnSessionStartedCallback,
   trackListeners,
 } from '../index.js';
@@ -67,6 +73,9 @@ export interface Services {
   pluginExecutor: PluginExecutor;
   poolService: AgentPoolService | undefined;
   inboxService: InboxService;
+  mergeStewardService: MergeStewardService;
+  healthStewardService: HealthStewardService;
+  docsStewardService: DocsStewardService;
   dispatchDaemon: DispatchDaemon | undefined;
   sessionInitialPrompts: Map<string, string>;
   sessionMessageService: SessionMessageService;
@@ -141,6 +150,28 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
     sessionManager,
     worktreeManager
   );
+
+  // Create steward services (before executor/scheduler so they can be passed to the executor)
+  const mergeStewardService = createMergeStewardService(
+    api,
+    taskAssignmentService,
+    dispatchService,
+    agentRegistry,
+    { workspaceRoot: projectRoot },
+    worktreeManager
+  );
+
+  const healthStewardService = createHealthStewardService(
+    api,
+    agentRegistry,
+    sessionManager,
+    taskAssignmentService,
+    dispatchService
+  );
+
+  const docsStewardService = createDocsStewardService({
+    workspaceRoot: projectRoot,
+  });
 
   const stewardExecutor = createDefaultStewardExecutor();
   const stewardScheduler = createStewardScheduler(agentRegistry, stewardExecutor, {
@@ -247,6 +278,9 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
     dispatchService,
     roleDefinitionService,
     workerTaskService,
+    mergeStewardService,
+    healthStewardService,
+    docsStewardService,
     stewardScheduler,
     pluginExecutor,
     poolService,
