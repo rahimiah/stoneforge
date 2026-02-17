@@ -1,0 +1,471 @@
+/**
+ * Steward Executor Integration Tests
+ *
+ * Integration tests that verify the full trigger-to-execution path:
+ * trigger fires -> executor called -> correct steward service invoked -> real result returned.
+ *
+ * These tests use mocked steward services (MergeStewardService, HealthStewardService,
+ * DocsStewardService) passed to createStewardExecutor(), and exercise the scheduler's
+ * executeSteward() / publishEvent() to trigger execution without waiting for cron.
+ */
+
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import type { EntityId } from '@stoneforge/core';
+import { EntityTypeValue, createTimestamp } from '@stoneforge/core';
+
+import type {
+  StewardTrigger,
+  StewardMetadata,
+  StewardFocus,
+} from '../../types/index.js';
+import type { AgentRegistry, AgentEntity } from '../agent-registry.js';
+import {
+  createStewardScheduler,
+  createStewardExecutor,
+  type StewardExecutor,
+  type StewardScheduler,
+  type StewardExecutorDeps,
+} from '../steward-scheduler.js';
+import type { MergeStewardService } from '../merge-steward-service.js';
+import type { HealthStewardService } from '../health-steward-service.js';
+import type { DocsStewardService } from '../docs-steward-service.js';
+
+// ============================================================================
+// Test Helpers
+// ============================================================================
+
+function createMockAgentEntity(
+  id: string,
+  name: string,
+  focus: StewardFocus,
+  triggers: StewardTrigger[] = []
+): AgentEntity {
+  const metadata: StewardMetadata = {
+    agentRole: 'steward',
+    stewardFocus: focus,
+    triggers,
+    sessionStatus: 'idle',
+  };
+
+  return {
+    id: id,
+    type: 'entity',
+    name,
+    entityType: EntityTypeValue.AGENT,
+    createdBy: 'test-user' as EntityId,
+    createdAt: createTimestamp(),
+    updatedAt: createTimestamp(),
+    version: 1,
+    metadata: { agent: metadata },
+    tags: [],
+  } as unknown as AgentEntity;
+}
+
+function createMockAgentRegistry(
+  agents: AgentEntity[] = []
+): AgentRegistry {
+  return {
+    registerAgent: vi.fn(),
+    registerDirector: vi.fn(),
+    registerWorker: vi.fn(),
+    registerSteward: vi.fn(),
+    getAgent: vi.fn(async (id: EntityId) => agents.find(a => String(a.id) === String(id))),
+    getAgentByName: vi.fn(async (name: string) => agents.find(a => a.name === name)),
+    listAgents: vi.fn(async () => agents),
+    getAgentsByRole: vi.fn(async (role: string) =>
+      agents.filter(a => {
+        const meta = a.metadata?.agent as StewardMetadata | undefined;
+        return meta?.agentRole === role;
+      })
+    ),
+    getAvailableWorkers: vi.fn(async () => []),
+    getStewards: vi.fn(async () =>
+      agents.filter(a => {
+        const meta = a.metadata?.agent as StewardMetadata | undefined;
+        return meta?.agentRole === 'steward';
+      })
+    ),
+    getDirector: vi.fn(async () => undefined),
+    updateAgentSession: vi.fn(async (id: EntityId) => agents.find(a => String(a.id) === String(id))),
+    updateAgentMetadata: vi.fn(async (id: EntityId, _updates: unknown) => {
+      const agent = agents.find(a => String(a.id) === String(id));
+      return agent;
+    }),
+    getAgentChannel: vi.fn(async () => undefined),
+    getAgentChannelId: vi.fn(async () => undefined),
+  } as unknown as AgentRegistry;
+}
+
+function createMockMergeStewardService(): MergeStewardService {
+  return {
+    processAllPending: vi.fn(async () => ({
+      totalProcessed: 3,
+      mergedCount: 2,
+      testFailedCount: 0,
+      conflictCount: 0,
+      errorCount: 1,
+      results: [],
+      durationMs: 150,
+    })),
+    getTasksAwaitingMerge: vi.fn(async () => []),
+    runTests: vi.fn(),
+    mergeTask: vi.fn(),
+    processTask: vi.fn(),
+  } as unknown as MergeStewardService;
+}
+
+function createMockHealthStewardService(): HealthStewardService {
+  return {
+    runHealthCheck: vi.fn(async () => ({
+      timestamp: createTimestamp(),
+      agentsChecked: 5,
+      agentsWithIssues: 1,
+      newIssues: [{ id: 'issue-1', type: 'no_output', severity: 'warning' }],
+      resolvedIssues: [],
+      actionsTaken: [{ action: 'send_ping', agentId: 'agent-1', success: true }],
+      durationMs: 200,
+    })),
+    checkAgent: vi.fn(),
+    getKnownIssues: vi.fn(async () => []),
+    start: vi.fn(),
+    stop: vi.fn(),
+  } as unknown as HealthStewardService;
+}
+
+function createMockDocsStewardService(): DocsStewardService {
+  return {
+    scanAll: vi.fn(async () => ({
+      issues: [
+        { type: 'file_path', file: 'docs/guide.md', line: 10, description: 'Broken path', currentValue: './missing.ts', confidence: 'high', context: '', complexity: 'low' },
+        { type: 'internal_link', file: 'docs/api.md', line: 25, description: 'Dead link', currentValue: '#nonexistent', confidence: 'medium', context: '', complexity: 'low' },
+      ],
+      filesScanned: 42,
+      durationMs: 300,
+    })),
+    verifyFilePaths: vi.fn(async () => []),
+    verifyInternalLinks: vi.fn(async () => []),
+    verifyExports: vi.fn(async () => []),
+    verifyCliCommands: vi.fn(async () => []),
+    verifyTypeFields: vi.fn(async () => []),
+    verifyApiMethods: vi.fn(async () => []),
+  } as unknown as DocsStewardService;
+}
+
+function createDeps(overrides: Partial<StewardExecutorDeps> = {}): StewardExecutorDeps {
+  return {
+    mergeStewardService: createMockMergeStewardService(),
+    healthStewardService: createMockHealthStewardService(),
+    docsStewardService: createMockDocsStewardService(),
+    ...overrides,
+  };
+}
+
+// ============================================================================
+// Integration Tests: Trigger -> Executor -> Service -> Result
+// ============================================================================
+
+describe('Steward Executor Integration Tests', () => {
+  let deps: StewardExecutorDeps;
+  let executor: StewardExecutor;
+
+  beforeEach(() => {
+    deps = createDeps();
+    executor = createStewardExecutor(deps);
+  });
+
+  // --------------------------------------------------------------------------
+  // Test 1: Merge steward cron trigger
+  // --------------------------------------------------------------------------
+  describe('merge steward cron trigger', () => {
+    it('should call mergeStewardService.processAllPending() and return real data', async () => {
+      const mergeSteward = createMockAgentEntity('merge-steward-1', 'Merger', 'merge', [
+        { type: 'cron', schedule: '*/5 * * * *' },
+      ]);
+      const registry = createMockAgentRegistry([mergeSteward]);
+      const scheduler = createStewardScheduler(registry, executor);
+
+      // Manually execute the steward (simulates cron fire)
+      const result = await scheduler.executeSteward('merge-steward-1' as EntityId);
+
+      expect(result.success).toBe(true);
+      expect(deps.mergeStewardService.processAllPending).toHaveBeenCalledTimes(1);
+      expect(result.output).toContain('Processed 3 tasks');
+      expect(result.output).toContain('2 merged');
+      expect(result.output).toContain('1 failed');
+      expect(result.itemsProcessed).toBe(3);
+      expect(result.durationMs).toBeGreaterThanOrEqual(0);
+
+      await scheduler.stop();
+    });
+
+    it('should record execution in scheduler history', async () => {
+      const mergeSteward = createMockAgentEntity('merge-steward-1', 'Merger', 'merge', [
+        { type: 'cron', schedule: '*/5 * * * *' },
+      ]);
+      const registry = createMockAgentRegistry([mergeSteward]);
+      const scheduler = createStewardScheduler(registry, executor);
+
+      await scheduler.executeSteward('merge-steward-1' as EntityId);
+
+      const history = scheduler.getExecutionHistory();
+      expect(history.length).toBe(1);
+      expect(history[0].stewardId).toBe('merge-steward-1');
+      expect(history[0].result?.success).toBe(true);
+      expect(history[0].result?.itemsProcessed).toBe(3);
+
+      await scheduler.stop();
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Test 2: Health steward event trigger
+  // --------------------------------------------------------------------------
+  describe('health steward event trigger', () => {
+    it('should call healthStewardService.runHealthCheck() on event publish', async () => {
+      const healthSteward = createMockAgentEntity('health-steward-1', 'HealthChecker', 'health', [
+        { type: 'event', event: 'agent_health_check' },
+      ]);
+      const registry = createMockAgentRegistry([healthSteward]);
+      const scheduler = createStewardScheduler(registry, executor);
+
+      await scheduler.registerSteward('health-steward-1' as EntityId);
+      await scheduler.start();
+
+      const triggered = await scheduler.publishEvent('agent_health_check', {});
+
+      expect(triggered).toBe(1);
+
+      // Allow async execution to complete
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(deps.healthStewardService.runHealthCheck).toHaveBeenCalledTimes(1);
+
+      await scheduler.stop();
+    });
+
+    it('should also work via manual execution and return correct data', async () => {
+      const healthSteward = createMockAgentEntity('health-steward-1', 'HealthChecker', 'health', [
+        { type: 'event', event: 'agent_health_check' },
+      ]);
+      const registry = createMockAgentRegistry([healthSteward]);
+      const scheduler = createStewardScheduler(registry, executor);
+
+      const result = await scheduler.executeSteward('health-steward-1' as EntityId);
+
+      expect(result.success).toBe(true);
+      expect(deps.healthStewardService.runHealthCheck).toHaveBeenCalledTimes(1);
+      expect(result.output).toContain('Checked 5 agents');
+      expect(result.output).toContain('1 new issues');
+      expect(result.output).toContain('1 actions taken');
+      expect(result.itemsProcessed).toBe(5);
+
+      await scheduler.stop();
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Test 3: Docs steward cron trigger
+  // --------------------------------------------------------------------------
+  describe('docs steward cron trigger', () => {
+    it('should call docsStewardService.scanAll() and return real data', async () => {
+      const docsSteward = createMockAgentEntity('docs-steward-1', 'DocsScanner', 'docs', [
+        { type: 'cron', schedule: '0 */6 * * *' },
+      ]);
+      const registry = createMockAgentRegistry([docsSteward]);
+      const scheduler = createStewardScheduler(registry, executor);
+
+      const result = await scheduler.executeSteward('docs-steward-1' as EntityId);
+
+      expect(result.success).toBe(true);
+      expect(deps.docsStewardService.scanAll).toHaveBeenCalledTimes(1);
+      expect(result.output).toContain('Scanned docs');
+      expect(result.output).toContain('2 issues found');
+      expect(result.itemsProcessed).toBe(2);
+      expect(result.durationMs).toBeGreaterThanOrEqual(0);
+
+      await scheduler.stop();
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Test 4: Unknown focus type
+  // --------------------------------------------------------------------------
+  describe('unknown focus type', () => {
+    it('should return success: false gracefully when executor receives unknown focus', async () => {
+      // Call the executor directly with an agent that has no valid metadata.
+      // getAgentMetadata returns undefined when validation fails for an invalid
+      // focus, so the executor sees focus = undefined and hits the default branch.
+      const unknownAgent = {
+        id: 'unknown-steward-1',
+        type: 'entity',
+        name: 'UnknownSteward',
+        entityType: EntityTypeValue.AGENT,
+        createdBy: 'test-user' as EntityId,
+        createdAt: createTimestamp(),
+        updatedAt: createTimestamp(),
+        version: 1,
+        // No valid agent metadata — simulates an entity with an unrecognised focus
+        metadata: {},
+        tags: [],
+      } as unknown as AgentEntity;
+
+      const result = await executor(unknownAgent, {
+        trigger: { type: 'event' as const, event: 'manual' },
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.output).toContain('Unknown steward focus');
+      expect(result.durationMs).toBeGreaterThanOrEqual(0);
+
+      // No service should have been called
+      expect(deps.mergeStewardService.processAllPending).not.toHaveBeenCalled();
+      expect(deps.healthStewardService.runHealthCheck).not.toHaveBeenCalled();
+      expect(deps.docsStewardService.scanAll).not.toHaveBeenCalled();
+    });
+
+    it('should return success: false via scheduler when steward has invalid focus', async () => {
+      // When the agent metadata validation rejects the focus, the scheduler
+      // returns an error before even reaching the executor.
+      const unknownSteward = createMockAgentEntity(
+        'unknown-steward-1',
+        'UnknownSteward',
+        'invalid-focus' as StewardFocus,
+        [{ type: 'cron', schedule: '* * * * *' }]
+      );
+      const registry = createMockAgentRegistry([unknownSteward]);
+      const scheduler = createStewardScheduler(registry, executor);
+
+      const result = await scheduler.executeSteward('unknown-steward-1' as EntityId);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not a steward');
+      expect(result.durationMs).toBe(0);
+
+      await scheduler.stop();
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Test 5: Service error handling
+  // --------------------------------------------------------------------------
+  describe('service error handling', () => {
+    it('should return success: false with error message when service throws', async () => {
+      const failingMergeService = createMockMergeStewardService();
+      (failingMergeService.processAllPending as ReturnType<typeof vi.fn>).mockRejectedValue(
+        new Error('Database connection lost')
+      );
+
+      const failDeps = createDeps({ mergeStewardService: failingMergeService });
+      const failExecutor = createStewardExecutor(failDeps);
+
+      const mergeSteward = createMockAgentEntity('merge-steward-1', 'FailingMerger', 'merge', [
+        { type: 'cron', schedule: '*/5 * * * *' },
+      ]);
+      const registry = createMockAgentRegistry([mergeSteward]);
+      const scheduler = createStewardScheduler(registry, failExecutor);
+
+      const result = await scheduler.executeSteward('merge-steward-1' as EntityId);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Database connection lost');
+      expect(result.output).toContain('Database connection lost');
+      expect(result.durationMs).toBeGreaterThanOrEqual(0);
+
+      await scheduler.stop();
+    });
+
+    it('should continue operating after one steward fails (error isolation)', async () => {
+      const failingMergeService = createMockMergeStewardService();
+      (failingMergeService.processAllPending as ReturnType<typeof vi.fn>).mockRejectedValue(
+        new Error('Merge service crashed')
+      );
+
+      const isolationDeps = createDeps({ mergeStewardService: failingMergeService });
+      const isolationExecutor = createStewardExecutor(isolationDeps);
+
+      // Set up two stewards: one that will fail (merge) and one that should succeed (health)
+      const mergeSteward = createMockAgentEntity('merge-steward-1', 'FailingMerger', 'merge', [
+        { type: 'cron', schedule: '*/5 * * * *' },
+      ]);
+      const healthSteward = createMockAgentEntity('health-steward-1', 'HealthChecker', 'health', [
+        { type: 'cron', schedule: '*/10 * * * *' },
+      ]);
+      const registry = createMockAgentRegistry([mergeSteward, healthSteward]);
+      const scheduler = createStewardScheduler(registry, isolationExecutor);
+
+      // Execute the failing merge steward first
+      const mergeResult = await scheduler.executeSteward('merge-steward-1' as EntityId);
+      expect(mergeResult.success).toBe(false);
+      expect(mergeResult.error).toBe('Merge service crashed');
+
+      // The scheduler should still work fine - execute health steward
+      const healthResult = await scheduler.executeSteward('health-steward-1' as EntityId);
+      expect(healthResult.success).toBe(true);
+      expect(isolationDeps.healthStewardService.runHealthCheck).toHaveBeenCalledTimes(1);
+      expect(healthResult.itemsProcessed).toBe(5);
+
+      // Verify both executions are recorded in history
+      const history = scheduler.getExecutionHistory();
+      expect(history.length).toBe(2);
+
+      const failedHistory = scheduler.getExecutionHistory({ success: false });
+      expect(failedHistory.length).toBe(1);
+
+      const successHistory = scheduler.getExecutionHistory({ success: true });
+      expect(successHistory.length).toBe(1);
+
+      await scheduler.stop();
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Test 6: Reminder/ops focus (graceful no-op)
+  // --------------------------------------------------------------------------
+  describe('reminder/ops focus - graceful no-op', () => {
+    it('should return success: true with itemsProcessed: 0 for reminder focus', async () => {
+      const reminderSteward = createMockAgentEntity('reminder-steward-1', 'Reminder', 'reminder', [
+        { type: 'cron', schedule: '0 9 * * *' },
+      ]);
+      const registry = createMockAgentRegistry([reminderSteward]);
+      const scheduler = createStewardScheduler(registry, executor);
+
+      const result = await scheduler.executeSteward('reminder-steward-1' as EntityId);
+
+      expect(result.success).toBe(true);
+      expect(result.itemsProcessed).toBe(0);
+      expect(result.output).toContain('reminder');
+      expect(result.output).toContain('no automated service');
+      expect(result.durationMs).toBeGreaterThanOrEqual(0);
+
+      // No service should have been called
+      expect(deps.mergeStewardService.processAllPending).not.toHaveBeenCalled();
+      expect(deps.healthStewardService.runHealthCheck).not.toHaveBeenCalled();
+      expect(deps.docsStewardService.scanAll).not.toHaveBeenCalled();
+
+      await scheduler.stop();
+    });
+
+    it('should return success: true with itemsProcessed: 0 for ops focus', async () => {
+      const opsSteward = createMockAgentEntity('ops-steward-1', 'Ops', 'ops', [
+        { type: 'cron', schedule: '*/30 * * * *' },
+      ]);
+      const registry = createMockAgentRegistry([opsSteward]);
+      const scheduler = createStewardScheduler(registry, executor);
+
+      const result = await scheduler.executeSteward('ops-steward-1' as EntityId);
+
+      expect(result.success).toBe(true);
+      expect(result.itemsProcessed).toBe(0);
+      expect(result.output).toContain('ops');
+      expect(result.output).toContain('no automated service');
+      expect(result.durationMs).toBeGreaterThanOrEqual(0);
+
+      // No service should have been called
+      expect(deps.mergeStewardService.processAllPending).not.toHaveBeenCalled();
+      expect(deps.healthStewardService.runHealthCheck).not.toHaveBeenCalled();
+      expect(deps.docsStewardService.scanAll).not.toHaveBeenCalled();
+
+      await scheduler.stop();
+    });
+  });
+});
