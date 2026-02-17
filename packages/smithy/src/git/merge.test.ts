@@ -487,6 +487,90 @@ describe('mergeBranch (local-only, no remote)', () => {
   });
 });
 
+// ============================================================================
+// Pre-flight conflict detection regression tests
+// ============================================================================
+
+describe('mergeBranch pre-flight conflict detection', () => {
+  test('does NOT false-positive when source files contain literal conflict marker strings', async () => {
+    const repoDir = await createTestRepo();
+    try {
+      // Create a feature branch with a file containing literal conflict markers
+      await execAsync('git checkout -b feature/conflict-literals', { cwd: repoDir });
+      const fileWithMarkers = [
+        '// This file documents git conflict markers for educational purposes',
+        '// A conflict marker looks like:',
+        '// <<<<<<< HEAD',
+        '// your changes',
+        '// =======',
+        '// their changes',
+        '// >>>>>>> branch-name',
+        '',
+        'export const CONFLICT_MARKER_EXAMPLE = "<<<<<<< HEAD";',
+        'export const SEPARATOR = "=======";',
+        'export const END_MARKER = ">>>>>>> some-branch";',
+        '',
+        '// Test fixture with inline markers',
+        'export const testFixture = `',
+        '<<<<<<< HEAD',
+        'version A',
+        '=======',
+        'version B',
+        '>>>>>>> feature',
+        '`;',
+        '',
+      ].join('\n');
+      fs.writeFileSync(path.join(repoDir, 'conflict-docs.ts'), fileWithMarkers);
+      await execAsync('git add . && git commit -m "Add file with conflict marker literals"', { cwd: repoDir });
+      await execAsync('git checkout main', { cwd: repoDir });
+
+      const result = await mergeBranch({
+        workspaceRoot: repoDir,
+        sourceBranch: 'feature/conflict-literals',
+        targetBranch: 'main',
+        commitMessage: 'Merge branch with conflict marker literals',
+        syncLocal: false,
+      });
+
+      // Should succeed — the conflict markers are in file content, not real conflicts
+      expect(result.success).toBe(true);
+      expect(result.hasConflict).toBe(false);
+      expect(result.commitHash).toBeDefined();
+    } finally {
+      rmrf(repoDir);
+    }
+  });
+
+  test('still detects real merge conflicts in pre-flight', async () => {
+    const repoDir = await createTestRepo();
+    try {
+      // Create conflicting changes on two branches
+      await execAsync('git checkout -b feature/real-conflict', { cwd: repoDir });
+      fs.writeFileSync(path.join(repoDir, 'README.md'), '# Feature branch version\n');
+      await execAsync('git add . && git commit -m "Feature README change"', { cwd: repoDir });
+
+      await execAsync('git checkout main', { cwd: repoDir });
+      fs.writeFileSync(path.join(repoDir, 'README.md'), '# Main branch version\n');
+      await execAsync('git add . && git commit -m "Main README change"', { cwd: repoDir });
+
+      const result = await mergeBranch({
+        workspaceRoot: repoDir,
+        sourceBranch: 'feature/real-conflict',
+        targetBranch: 'main',
+        commitMessage: 'Should detect conflict',
+        preflight: true,
+      });
+
+      // Should fail with conflict
+      expect(result.success).toBe(false);
+      expect(result.hasConflict).toBe(true);
+      expect(result.error).toContain('conflict');
+    } finally {
+      rmrf(repoDir);
+    }
+  });
+});
+
 describe('syncLocalBranchFromCommit', () => {
   test('updates target branch ref to commit hash when not on target branch', async () => {
     const repoDir = await createTestRepo();

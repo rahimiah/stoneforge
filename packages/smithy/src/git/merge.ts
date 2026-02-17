@@ -218,7 +218,7 @@ export async function mergeBranch(options: MergeBranchOptions): Promise<MergeBra
         `git merge-tree ${mergeBase.trim()} ${preflightRef} ${sourceBranch}`,
         { cwd: workspaceRoot, encoding: 'utf8' }
       ).catch((e: { stdout?: string }) => e);
-      if ((dryRun as { stdout?: string }).stdout?.includes('<<<<<<<')) {
+      if (/^<{7} .+/m.test((dryRun as { stdout?: string }).stdout ?? '')) {
         const dryRunOutput = (dryRun as { stdout: string }).stdout;
         const conflictFiles = [...dryRunOutput.matchAll(/\+\+\+ b\/(.+)/g)].map(m => m[1]);
         return {
