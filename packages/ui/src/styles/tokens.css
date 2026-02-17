@@ -126,6 +126,7 @@
   --color-border-focus: #3b82f6;
 
   --color-surface: #ffffff;
+  --color-surface-elevated: #f9fafb;
   --color-surface-hover: #f9fafb;
   --color-surface-active: #f3f4f6;
   --color-surface-selected: #eff6ff;
@@ -205,6 +206,7 @@
   --color-border-subtle: #1f1f1f;
 
   --color-surface: #161616;
+  --color-surface-elevated: #1e1e1e;
   --color-surface-hover: #1f1f1f;
   --color-surface-active: #262626;
   --color-surface-selected: #1e3a5f;
@@ -425,6 +427,7 @@
   --color-border-subtle: #666666;
 
   --color-surface: #ffffff;
+  --color-surface-elevated: #f5f5f5;
   --color-surface-hover: #f0f0f0;
   --color-surface-active: #e0e0e0;
   --color-surface-selected: #cce5ff;
@@ -509,6 +512,7 @@
   --color-border-subtle: #808080;
 
   --color-surface: #0a0a0a;
+  --color-surface-elevated: #1a1a1a;
   --color-surface-hover: #1a1a1a;
   --color-surface-active: #2a2a2a;
   --color-surface-selected: #003366;
