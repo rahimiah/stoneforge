@@ -203,6 +203,54 @@ sf delete el-abc123 --reason "Duplicate entry"
 sf delete el-abc123 -f
 ```
 
+## Init Command
+
+Initialize a new Stoneforge workspace in the current directory.
+
+```bash
+sf init [options]
+```
+
+| Option            | Description                      |
+| ----------------- | -------------------------------- |
+| `--name <name>`   | Workspace name (optional)        |
+| `--actor <actor>`  | Default actor for operations    |
+
+Creates a `.stoneforge/` directory containing:
+- `config.yaml` — Default configuration file
+- `stoneforge.db` — SQLite database with default operator entity (`el-0000`)
+- `.gitignore` — Git ignore patterns for database files
+- `playbooks/` — Directory for playbook definitions
+- `AGENTS.md` — Agent context file at workspace root (if no `AGENTS.md` or `CLAUDE.md` exists)
+
+If the `.stoneforge/` directory already exists (e.g., after cloning a repo) but no database is present, `sf init` will create the database and auto-import from any existing JSONL sync files. Claude skills are also installed automatically during init.
+
+```bash
+# Initialize a new workspace
+sf init
+
+# Initialize with a specific default actor
+sf init --actor my-agent
+```
+
+## Stats Command
+
+Show statistics about the Stoneforge workspace.
+
+```bash
+sf stats [options]
+```
+
+Displays element counts by type, ready/blocked task counts, dependency and event counts, and database size.
+
+```bash
+# Show all statistics
+sf stats
+
+# Output as JSON
+sf stats --json
+```
+
 ## Serve Command
 
 Start a Stoneforge server. Supports starting either the quarry (core) or smithy (orchestrator) server.
@@ -1474,18 +1522,159 @@ sf config unset actor
 | `sf identity hash`                | Compute hash          |
 | `sf identity mode [mode]`         | Show/set mode         |
 
-## Admin Commands
+Without a subcommand, `sf identity` shows the current actor identity (same as `sf whoami`).
 
-| Command      | Description           |
-| ------------ | --------------------- |
-| `sf doctor`  | Database health check |
-| `sf migrate` | Run migrations        |
+#### identity sign
+
+Sign data using an Ed25519 private key. The signature is computed over: `actor|signedAt|requestHash`.
+
+| Option                     | Description                                        |
+| -------------------------- | -------------------------------------------------- |
+| `-d, --data <string>`      | Data to sign (will be hashed)                      |
+| `-f, --file <path>`        | File containing data to sign                       |
+| `--hash <hash>`            | Pre-computed SHA256 hash (hex)                     |
+
+The private key is resolved from (in priority order):
+1. `--sign-key <key>` global flag (direct base64 PKCS8 key)
+2. `--sign-key-file <path>` global flag (path to key file)
+3. `STONEFORGE_SIGN_KEY` environment variable
+4. `STONEFORGE_SIGN_KEY_FILE` environment variable
 
 ```bash
-# Health check
-sf doctor -v
+sf identity sign --data "hello world" --sign-key <key> --actor alice
+sf identity sign --file request.json --sign-key-file ~/.stoneforge/private.key
+sf identity sign --hash abc123... --actor alice
+```
 
-# Dry run migrations
+#### identity verify
+
+Verify an Ed25519 signature against data. The signature must have been computed over: `actor|signedAt|requestHash`.
+
+| Option                     | Description                                  |
+| -------------------------- | -------------------------------------------- |
+| `-s, --signature <sig>`    | Signature to verify (base64, required)       |
+| `-k, --public-key <key>`   | Public key to verify against (base64, required) |
+| `--signed-at <time>`       | Timestamp when signed (ISO 8601, required)   |
+| `-d, --data <string>`      | Original data that was signed                |
+| `-f, --file <path>`        | File containing original data                |
+| `--hash <hash>`            | Request hash that was signed                 |
+
+One of `--data`, `--file`, or `--hash` is required.
+
+```bash
+sf identity verify --signature <sig> --public-key <key> --signed-at 2024-01-01T00:00:00Z --data "hello" --actor alice
+sf identity verify -s <sig> -k <key> --signed-at <time> --hash abc123... --actor alice
+```
+
+#### identity hash
+
+Compute a SHA256 hash of data for use in signing.
+
+| Option                | Description        |
+| --------------------- | ------------------ |
+| `-d, --data <string>` | Data to hash       |
+| `-f, --file <path>`   | File to hash       |
+
+One of `--data` or `--file` is required.
+
+```bash
+sf identity hash --data "hello world"
+sf identity hash --file request.json
+```
+
+#### identity keygen
+
+Generate a new Ed25519 keypair for cryptographic identity.
+
+```bash
+sf identity keygen
+sf identity keygen --json
+sf identity keygen --quiet  # Returns just the public key
+```
+
+#### identity mode
+
+Show or set the identity verification mode.
+
+| Argument | Description                                      |
+| -------- | ------------------------------------------------ |
+| `[mode]` | Mode to set: `soft`, `cryptographic`, or `hybrid` |
+
+Without an argument, shows the current mode. With an argument, sets the mode.
+
+- **soft** — Name-based identity without verification (default)
+- **cryptographic** — Key-based identity with signature verification
+- **hybrid** — Accepts both verified and unverified actors
+
+```bash
+sf identity mode                # Show current mode
+sf identity mode soft           # Set to soft mode
+sf identity mode cryptographic  # Set to cryptographic mode
+```
+
+## Admin Commands
+
+| Command      | Description                            |
+| ------------ | -------------------------------------- |
+| `sf doctor`  | Check system health and diagnose issues|
+| `sf migrate` | Run database migrations                |
+
+### Doctor
+
+Check system health and diagnose issues.
+
+```bash
+sf doctor [options]
+```
+
+Performs 9 diagnostic checks:
+
+| Check            | Description                                               |
+| ---------------- | --------------------------------------------------------- |
+| workspace        | Verifies `.stoneforge/` directory exists                  |
+| database         | Checks that the database file exists                      |
+| connection       | Verifies the database can be opened                       |
+| schema_version   | Checks schema version is current                          |
+| schema_tables    | Validates all expected tables are present                 |
+| integrity        | Runs SQLite `PRAGMA integrity_check`                      |
+| foreign_keys     | Validates foreign key constraints (`PRAGMA foreign_key_check`) |
+| blocked_cache    | Checks blocked cache consistency (orphaned entries, missing cache entries) |
+| storage          | Reports database file size                                |
+
+Each check reports a status: `[OK]`, `[WARN]`, or `[ERROR]`. The command exits with a non-zero exit code if any errors are found.
+
+Use `--verbose` to see detailed diagnostic information for each check.
+
+```bash
+# Run all diagnostics
+sf doctor
+
+# Show detailed information
+sf doctor --verbose
+
+# Output as JSON
+sf doctor --json
+```
+
+### Migrate
+
+Run database migrations to update the schema.
+
+```bash
+sf migrate [options]
+```
+
+| Option      | Description                                              |
+| ----------- | -------------------------------------------------------- |
+| `--dry-run` | Show what migrations would be applied without running them |
+
+Migrations are run automatically when needed, but this command can be used to manually trigger migration, check what migrations are pending, or verify migration status.
+
+```bash
+# Run pending migrations
+sf migrate
+
+# Preview migrations without applying
 sf migrate --dry-run
 ```
 
