@@ -31,11 +31,8 @@ import {
   ArrowUp,
   ArrowDown,
   ArrowUpDown,
-  Trash2,
-  AlertTriangle,
-  X,
 } from 'lucide-react';
-import { useTasksByStatus, useStartTask, useCompleteTask, useReopenTask, useUpdateTask, useBulkDeleteTasks } from '../../api/hooks/useTasks';
+import { useTasksByStatus, useStartTask, useCompleteTask, useReopenTask, useUpdateTask, useBulkDeleteTasks, useBulkUpdateTasks } from '../../api/hooks/useTasks';
 import { useAllEntities } from '../../api/hooks/useAllElements';
 import {
   TaskRow,
@@ -47,6 +44,7 @@ import {
   ViewToggle,
   FilterBar,
   KanbanBoard,
+  BulkActionMenu,
 } from '../../components/task';
 import { Pagination } from '../../components/shared/Pagination';
 import type { Task } from '../../api/types';
@@ -127,7 +125,7 @@ export function TasksPage() {
 
   // Bulk selection state
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
-  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+  // Note: showBulkDeleteConfirm state moved into BulkActionMenu component
 
   // Column resize
   const { columnWidths, handleMouseDown: handleColumnResizeStart } = useColumnResize();
@@ -195,6 +193,7 @@ export function TasksPage() {
   const reopenTaskMutation = useReopenTask();
   const updateTaskMutation = useUpdateTask();
   const bulkDeleteMutation = useBulkDeleteTasks();
+  const bulkUpdateMutation = useBulkUpdateTasks();
 
   // Setters with persistence
   const setViewMode = useCallback((mode: ViewMode) => {
@@ -530,9 +529,26 @@ export function TasksPage() {
     try {
       await bulkDeleteMutation.mutateAsync({ ids: Array.from(selectedTaskIds) });
       setSelectedTaskIds(new Set());
-      setShowBulkDeleteConfirm(false);
     } catch (error) {
       console.error('Failed to bulk delete tasks:', error);
+    }
+  };
+
+  const handleBulkStatusChange = async (status: string) => {
+    try {
+      await bulkUpdateMutation.mutateAsync({ ids: Array.from(selectedTaskIds), updates: { status } });
+      setSelectedTaskIds(new Set());
+    } catch (error) {
+      console.error('Failed to bulk update task status:', error);
+    }
+  };
+
+  const handleBulkPriorityChange = async (priority: number) => {
+    try {
+      await bulkUpdateMutation.mutateAsync({ ids: Array.from(selectedTaskIds), updates: { priority } });
+      setSelectedTaskIds(new Set());
+    } catch (error) {
+      console.error('Failed to bulk update task priority:', error);
     }
   };
 
@@ -794,87 +810,15 @@ export function TasksPage() {
 
       {/* Bulk Actions Bar */}
       {selectedTaskIds.size > 0 && viewMode === 'list' && (
-        <div
-          className="flex items-center justify-between px-4 py-2.5 bg-[var(--color-primary-muted)] border border-[var(--color-primary)] rounded-lg"
-          data-testid="bulk-actions-bar"
-        >
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-medium text-[var(--color-primary)]">
-              {selectedTaskIds.size} task{selectedTaskIds.size !== 1 ? 's' : ''} selected
-            </span>
-            <button
-              onClick={handleClearSelection}
-              className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition-colors flex items-center gap-1"
-              data-testid="bulk-clear-selection"
-            >
-              <X className="w-3.5 h-3.5" />
-              Clear
-            </button>
-          </div>
-          <button
-            onClick={() => setShowBulkDeleteConfirm(true)}
-            className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 border border-red-200 dark:border-red-800 rounded-md transition-colors"
-            data-testid="bulk-delete-button"
-          >
-            <Trash2 className="w-4 h-4" />
-            Delete
-          </button>
-        </div>
-      )}
-
-      {/* Bulk Delete Confirmation Modal */}
-      {showBulkDeleteConfirm && (
-        <div
-          className="fixed inset-0 z-50"
-          onClick={() => setShowBulkDeleteConfirm(false)}
-          data-testid="bulk-delete-confirm-modal"
-        >
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-          <div
-            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="bg-[var(--color-surface)] rounded-xl shadow-2xl border border-[var(--color-border)]">
-              <div className="px-5 py-4 border-b border-[var(--color-border)]">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-full bg-red-100 dark:bg-red-900/30">
-                    <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-400" />
-                  </div>
-                  <div>
-                    <h2 className="text-lg font-semibold text-[var(--color-text)]">Delete Tasks</h2>
-                    <p className="text-sm text-[var(--color-text-secondary)]">
-                      This action cannot be undone.
-                    </p>
-                  </div>
-                </div>
-              </div>
-              <div className="px-5 py-4">
-                <p className="text-sm text-[var(--color-text)]">
-                  Are you sure you want to delete <strong>{selectedTaskIds.size}</strong> task{selectedTaskIds.size !== 1 ? 's' : ''}?
-                </p>
-              </div>
-              <div className="px-5 py-4 border-t border-[var(--color-border)] bg-[var(--color-bg-secondary)] rounded-b-xl flex items-center justify-end gap-3">
-                <button
-                  onClick={() => setShowBulkDeleteConfirm(false)}
-                  disabled={bulkDeleteMutation.isPending}
-                  className="px-4 py-2 text-sm font-medium text-[var(--color-text)] bg-[var(--color-surface-elevated)] hover:bg-[var(--color-surface-hover)] rounded-md transition-colors disabled:opacity-50"
-                  data-testid="bulk-delete-cancel"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleBulkDelete}
-                  disabled={bulkDeleteMutation.isPending}
-                  className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors disabled:opacity-50 flex items-center gap-2"
-                  data-testid="bulk-delete-confirm"
-                >
-                  {bulkDeleteMutation.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
-                  Delete {selectedTaskIds.size} Task{selectedTaskIds.size !== 1 ? 's' : ''}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <BulkActionMenu
+          selectedCount={selectedTaskIds.size}
+          onChangeStatus={handleBulkStatusChange}
+          onChangePriority={handleBulkPriorityChange}
+          onDelete={handleBulkDelete}
+          onClear={handleClearSelection}
+          isPending={bulkUpdateMutation.isPending}
+          isDeleting={bulkDeleteMutation.isPending}
+        />
       )}
 
       {/* Content */}

@@ -371,6 +371,29 @@ export function useDeleteTask() {
 }
 
 /**
+ * Hook to bulk update tasks (status, priority, etc.)
+ */
+export function useBulkUpdateTasks() {
+  const queryClient = useQueryClient();
+
+  return useMutation<
+    { success: boolean; results: { id: string; success: boolean; error?: string }[] },
+    Error,
+    { ids: string[]; updates: Record<string, unknown> }
+  >({
+    mutationFn: async ({ ids, updates }) => {
+      return fetchApi('/tasks/bulk', {
+        method: 'PATCH',
+        body: JSON.stringify({ ids, updates }),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+    },
+  });
+}
+
+/**
  * Hook to bulk delete tasks (soft-delete)
  */
 export function useBulkDeleteTasks() {

@@ -39,3 +39,4 @@ export { ViewToggle } from './ViewToggle';
 export { FilterBar } from './FilterBar';
 export { KanbanBoard } from './KanbanBoard';
 export { TaskActionsDropdown } from './TaskActionsDropdown';
+export { BulkActionMenu } from './BulkActionMenu';
