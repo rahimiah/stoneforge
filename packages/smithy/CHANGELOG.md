@@ -1,5 +1,15 @@
 # @stoneforge/smithy
 
+## 1.4.1
+
+### Patch Changes
+
+- b92e7d8: Spawn headless sessions through login shell when custom executable path is configured, enabling shell functions and aliases defined in user profiles to be found
+  - @stoneforge/core@1.4.1
+  - @stoneforge/storage@1.4.1
+  - @stoneforge/quarry@1.4.1
+  - @stoneforge/shared-routes@1.4.1
+
 ## 1.4.0
 
 ### Patch Changes
