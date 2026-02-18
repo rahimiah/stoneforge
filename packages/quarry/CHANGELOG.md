@@ -1,5 +1,40 @@
 # @stoneforge/quarry
 
+## 1.2.0
+
+### Minor Changes
+
+- 4fc3f2a: Display computed 'blocked' status in CLI task list and show commands for tasks with unresolved dependencies
+
+### Patch Changes
+
+- bd78abd: Export identity API functions (resolveActor, validateSoftActor, createVerificationMiddleware) and ActorSource type from systems module
+- dd47614: Rename 70 bun:test files to .bun.test.ts naming convention so vitest excludes them from collection. Add vitest.config.ts with exclude pattern.
+- 2872120: Reduce auto-export polling frequency from 500ms to 5 minutes to decrease unnecessary I/O
+- Updated dependencies [c7c3a2e]
+- Updated dependencies [acf6ed0]
+- Updated dependencies [a468899]
+- Updated dependencies [4fc3f2a]
+- Updated dependencies [dd47614]
+- Updated dependencies [2cec11b]
+- Updated dependencies [dd47614]
+- Updated dependencies [9b92e7d]
+- Updated dependencies [bbd2d1f]
+- Updated dependencies [430695f]
+- Updated dependencies [c3030f7]
+- Updated dependencies [6ad6161]
+- Updated dependencies [6a03ab1]
+- Updated dependencies [6835442]
+- Updated dependencies [ff790e4]
+- Updated dependencies [70dd977]
+- Updated dependencies [dfa164c]
+- Updated dependencies [ab58a62]
+- Updated dependencies [af0b8f3]
+  - @stoneforge/smithy@1.2.0
+  - @stoneforge/core@1.2.0
+  - @stoneforge/storage@1.2.0
+  - @stoneforge/shared-routes@1.2.0
+
 ## 1.1.0
 
 ### Minor Changes
