@@ -1418,6 +1418,12 @@ export class SessionManagerImpl implements SessionManager {
       current.events.emit('raw', data);
     };
 
+    const onRateLimited = (data: unknown) => {
+      const current = this.sessions.get(session.id);
+      if (!current) return;
+      current.events.emit('rate_limited', data);
+    };
+
     const onExit = async (code: number | null, signal: string | null) => {
       console.log(`[session-manager] Exit event received for session ${session.id}, agent ${session.agentId}, code=${code}, signal=${signal}`);
 
@@ -1500,6 +1506,7 @@ export class SessionManagerImpl implements SessionManager {
       'error': onError,
       'stderr': onStderr,
       'raw': onRaw,
+      'rate_limited': onRateLimited,
       'exit': onExit,
       'provider-session-id': onProviderSessionId,
     });

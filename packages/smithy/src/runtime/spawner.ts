@@ -27,6 +27,7 @@ import type {
   AgentMessage,
 } from '../providers/types.js';
 import { ClaudeAgentProvider } from '../providers/claude/index.js';
+import { isRateLimitMessage, parseRateLimitResetTime } from '../utils/rate-limit-parser.js';
 
 /**
  * Shell-quotes a string for safe inclusion in a bash command.
@@ -208,6 +209,8 @@ interface InternalSession extends SpawnedSession {
   cols?: number;
   /** Terminal rows (for interactive mode) */
   rows?: number;
+  /** Executable path used for this session's provider */
+  executablePath?: string;
 }
 
 /**
@@ -876,6 +879,10 @@ export class SpawnerServiceImpl implements SpawnerService {
   private async spawnHeadless(session: InternalSession, options?: SpawnOptions): Promise<void> {
     const headlessProvider = options?.provider?.headless ?? this.provider.headless;
 
+    // Track the executable path used for this session so rate limit events
+    // can identify which executable was limited.
+    session.executablePath = options?.claudePath ?? this.defaultConfig.claudePath;
+
     try {
       const headlessSession = await headlessProvider.spawn({
         workingDirectory: session.workingDirectory,
@@ -930,6 +937,16 @@ export class SpawnerServiceImpl implements SpawnerService {
               message: sessionNotFoundError,
             });
           }
+        }
+
+        // Check for rate limit
+        if (message.content && isRateLimitMessage(message.content)) {
+          const resetsAt = parseRateLimitResetTime(message.content);
+          session.events.emit('rate_limited', {
+            message: message.content,
+            resetsAt,
+            executablePath: session.executablePath,
+          });
         }
 
         // Convert AgentMessage to SpawnedSessionEvent
