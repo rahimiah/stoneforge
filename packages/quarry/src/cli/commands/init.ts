@@ -22,6 +22,7 @@ import {
 } from '@stoneforge/core';
 import { EntityTypeValue } from '@stoneforge/core';
 import { createSyncService } from '../../sync/service.js';
+import { installSkillsToWorkspace } from './install.js';
 
 // ============================================================================
 // Constants
@@ -260,6 +261,15 @@ async function initHandler(
       mkdirSync(playbooksDir, { recursive: true });
     }
 
+    // Create AGENTS.md at workspace root (skip if AGENTS.md or CLAUDE.md already exists)
+    const agentsMdPath = join(workDir, 'AGENTS.md');
+    const claudeMdPath = join(workDir, 'CLAUDE.md');
+    let agentsMdCreated = false;
+    if (!existsSync(agentsMdPath) && !existsSync(claudeMdPath)) {
+      writeFileSync(agentsMdPath, DEFAULT_AGENTS_MD);
+      agentsMdCreated = true;
+    }
+
     // Create the database and operator entity
     const backend = createStorage({ path: dbPath, create: true });
     initializeSchema(backend);
@@ -294,13 +304,40 @@ async function initHandler(
       }
     }
 
+    // Install skills (non-fatal if it fails)
+    let skillsMessage = '';
+    let skillsInstalled = 0;
+    try {
+      const skillsResult = installSkillsToWorkspace(workDir);
+      if (skillsResult) {
+        skillsInstalled = skillsResult.installed.length;
+        if (skillsResult.installed.length > 0) {
+          skillsMessage = `\nInstalled ${skillsResult.installed.length} skill(s) to ${skillsResult.targetDir}`;
+        } else if (skillsResult.skipped.length > 0) {
+          skillsMessage = `\nSkills already installed (${skillsResult.skipped.length} skill(s) skipped)`;
+        }
+        if (skillsResult.errors.length > 0) {
+          skillsMessage += `\nWarning: Failed to install ${skillsResult.errors.length} skill(s)`;
+        }
+      } else {
+        skillsMessage = '\nSkills installation skipped (no skills source found)';
+      }
+    } catch (skillsErr) {
+      const skillsErrMsg = skillsErr instanceof Error ? skillsErr.message : String(skillsErr);
+      skillsMessage = `\nWarning: Skills installation failed: ${skillsErrMsg}`;
+    }
+
     const baseMessage = partialInit
       ? `Initialized Stoneforge workspace from existing files at ${stoneforgeDir}`
       : `Initialized Stoneforge workspace at ${stoneforgeDir}`;
 
+    const agentsMdMessage = agentsMdCreated
+      ? '\nCreated AGENTS.md at workspace root'
+      : '';
+
     return success(
-      { path: stoneforgeDir, operatorId: OPERATOR_ENTITY_ID },
-      `${baseMessage}\nCreated default operator entity: ${OPERATOR_ENTITY_ID}${importMessage}`
+      { path: stoneforgeDir, operatorId: OPERATOR_ENTITY_ID, agentsMdCreated, skillsInstalled },
+      `${baseMessage}\nCreated default operator entity: ${OPERATOR_ENTITY_ID}${agentsMdMessage}${importMessage}${skillsMessage}`
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

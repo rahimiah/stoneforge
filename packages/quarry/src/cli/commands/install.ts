@@ -100,37 +100,45 @@ function copyDir(src: string, dest: string): void {
 }
 
 // ============================================================================
-// Install Skills Handler
+// Install Skills Core Logic
 // ============================================================================
 
-interface InstallSkillsOptions extends GlobalOptions {
-  force?: boolean;
+/**
+ * Result from installing skills to a workspace
+ */
+export interface InstallSkillsResult {
+  installed: string[];
+  skipped: string[];
+  errors: string[];
+  targetDir: string;
 }
 
-async function installSkillsHandler(
-  _args: string[],
-  options: InstallSkillsOptions
-): Promise<CommandResult> {
+/**
+ * Install skills to a workspace directory.
+ * This is the core logic used by both `sf install skills` and `sf init`.
+ *
+ * @param workDir - The workspace root directory (defaults to process.cwd())
+ * @param force - Whether to overwrite existing skills (defaults to false)
+ * @returns The installation result, or null if no skills source was found
+ */
+export function installSkillsToWorkspace(
+  workDir: string = process.cwd(),
+  force: boolean = false
+): InstallSkillsResult | null {
   // Find skills source directory
   const skillsSourceDir = findSkillsSourceDir();
   if (!skillsSourceDir) {
-    return failure(
-      'Could not find skills to install. Make sure @stoneforge/smithy is installed.',
-      ExitCode.GENERAL_ERROR
-    );
+    return null;
   }
 
   // Get skill directories
   const skillDirs = getSkillDirs(skillsSourceDir);
   if (skillDirs.length === 0) {
-    return failure(
-      `No skills found in ${skillsSourceDir}`,
-      ExitCode.GENERAL_ERROR
-    );
+    return null;
   }
 
   // Create target directory
-  const targetDir = join(process.cwd(), CLAUDE_DIR, SKILLS_DIR);
+  const targetDir = join(workDir, CLAUDE_DIR, SKILLS_DIR);
   if (!existsSync(targetDir)) {
     mkdirSync(targetDir, { recursive: true });
   }
@@ -145,7 +153,7 @@ async function installSkillsHandler(
     const destPath = join(targetDir, skillName);
 
     // Check if already exists
-    if (existsSync(destPath) && !options.force) {
+    if (existsSync(destPath) && !force) {
       skipped.push(skillName);
       continue;
     }
@@ -157,6 +165,32 @@ async function installSkillsHandler(
       errors.push(`${skillName}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
+
+  return { installed, skipped, errors, targetDir };
+}
+
+// ============================================================================
+// Install Skills Handler
+// ============================================================================
+
+interface InstallSkillsOptions extends GlobalOptions {
+  force?: boolean;
+}
+
+async function installSkillsHandler(
+  _args: string[],
+  options: InstallSkillsOptions
+): Promise<CommandResult> {
+  const result = installSkillsToWorkspace(process.cwd(), options.force ?? false);
+
+  if (!result) {
+    return failure(
+      'Could not find skills to install. Make sure @stoneforge/smithy is installed.',
+      ExitCode.GENERAL_ERROR
+    );
+  }
+
+  const { installed, skipped, errors, targetDir } = result;
 
   // Build output message
   const lines: string[] = [];
