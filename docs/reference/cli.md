@@ -149,15 +149,18 @@ sf alias
 
 **Built-in aliases:**
 
-| Alias              | Maps to   |
-| ------------------ | --------- |
-| `add`, `new`       | `create`  |
-| `rm`, `remove`     | `delete`  |
-| `ls`               | `list`    |
-| `s`, `get`         | `show`    |
-| `todo`, `tasks`    | `ready`   |
-| `done`, `complete` | `close`   |
-| `st`               | `status`  |
+| Alias              | Maps to      |
+| ------------------ | ------------ |
+| `add`, `new`       | `create`     |
+| `rm`, `remove`     | `delete`     |
+| `ls`               | `list`       |
+| `s`, `get`         | `show`       |
+| `todo`, `tasks`    | `ready`      |
+| `done`, `complete` | `close`      |
+| `st`               | `status`     |
+| `dep`              | `dependency` |
+| `msg`              | `message`    |
+| `doc`              | `document`   |
 
 ```bash
 # Show all aliases
