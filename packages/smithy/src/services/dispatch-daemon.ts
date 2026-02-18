@@ -2575,21 +2575,12 @@ export class DispatchDaemonImpl implements DispatchDaemon {
       return;
     }
 
-    // 4. Unassign the worker from the task
-    await this.api.update<Task>(task.id, {
-      assignee: undefined,
-      metadata: updateOrchestratorTaskMeta(
-        task.metadata as Record<string, unknown> | undefined,
-        {
-          assignedAgent: stewardId,
-        }
-      ),
-    });
-
-    // 5. Build the recovery steward prompt
+    // 4. Build the recovery steward prompt
     const initialPrompt = await this.buildRecoveryStewardPrompt(task, stewardId, taskMeta);
 
-    // 6. Start the recovery steward session
+    // 5. Start the recovery steward session BEFORE unassigning the worker.
+    //    If startSession fails (rate limited, pool full, etc.), the task retains
+    //    its original worker assignment and is not left orphaned.
     const { session, events } = await this.sessionManager.startSession(stewardId, {
       workingDirectory: worktreePath,
       worktree: worktreePath,
@@ -2598,34 +2589,56 @@ export class DispatchDaemonImpl implements DispatchDaemon {
       executablePathOverride: recoveryExecutableOverride ?? undefined,
     });
 
-    // 7. Record steward assignment and session history on the task
-    const taskAfterUpdate = await this.api.get<Task>(task.id);
-    const sessionHistoryEntry: TaskSessionHistoryEntry = {
-      sessionId: session.id,
-      providerSessionId: session.providerSessionId,
-      agentId: stewardId,
-      agentName: recoverySteward.name,
-      agentRole: 'steward',
-      startedAt: createTimestamp(),
-    };
+    // 6. Session started successfully — now transfer the task from worker to steward.
+    //    If the metadata update fails, terminate the steward session to avoid an
+    //    orphaned steward running without proper task assignment.
+    try {
+      const taskAfterUpdate = await this.api.get<Task>(task.id);
+      const sessionHistoryEntry: TaskSessionHistoryEntry = {
+        sessionId: session.id,
+        providerSessionId: session.providerSessionId,
+        agentId: stewardId,
+        agentName: recoverySteward.name,
+        agentRole: 'steward',
+        startedAt: createTimestamp(),
+      };
 
-    const metadataWithHistory = appendTaskSessionHistory(
-      taskAfterUpdate?.metadata as Record<string, unknown> | undefined,
-      sessionHistoryEntry
-    );
-    const finalMetadata = updateOrchestratorTaskMeta(
-      metadataWithHistory,
-      {
-        assignedAgent: stewardId,
-        sessionId: session.providerSessionId ?? session.id,
+      const metadataWithHistory = appendTaskSessionHistory(
+        taskAfterUpdate?.metadata as Record<string, unknown> | undefined,
+        sessionHistoryEntry
+      );
+      const finalMetadata = updateOrchestratorTaskMeta(
+        metadataWithHistory,
+        {
+          assignedAgent: stewardId,
+          sessionId: session.providerSessionId ?? session.id,
+        }
+      );
+      await this.api.update<Task>(task.id, {
+        assignee: stewardId,
+        metadata: finalMetadata,
+      });
+    } catch (metadataError) {
+      // Metadata update failed — terminate the steward session to prevent an
+      // orphaned steward running without a proper task assignment. The task
+      // retains its original worker assignment and can be retried on next poll.
+      logger.error(
+        `Failed to update task metadata after starting recovery steward session for ${task.id}. ` +
+        `Terminating steward session to prevent orphan.`,
+        metadataError
+      );
+      try {
+        await this.sessionManager.stopSession(stewardId);
+      } catch (stopError) {
+        logger.error(
+          `Failed to stop orphaned recovery steward session for ${recoverySteward.name}:`,
+          stopError
+        );
       }
-    );
-    await this.api.update<Task>(task.id, {
-      assignee: stewardId,
-      metadata: finalMetadata,
-    });
+      throw metadataError;
+    }
 
-    // 8. Callbacks and notifications
+    // 7. Callbacks and notifications
     if (this.config.onSessionStarted) {
       this.config.onSessionStarted(session, events, stewardId, initialPrompt);
     }

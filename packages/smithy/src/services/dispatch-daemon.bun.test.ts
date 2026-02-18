@@ -2038,3 +2038,236 @@ describe('DispatchDaemon Rate Limit Integration', () => {
     daemon = noSettingsDaemon;
   });
 });
+
+// ============================================================================
+// spawnRecoveryStewardForTask - atomicity tests
+// ============================================================================
+
+describe('spawnRecoveryStewardForTask - atomic worker unassignment', () => {
+  let api: QuarryAPI;
+  let inboxService: InboxService;
+  let agentRegistry: AgentRegistry;
+  let taskAssignment: TaskAssignmentService;
+  let dispatchService: DispatchService;
+  let sessionManager: SessionManager;
+  let worktreeManager: WorktreeManager;
+  let stewardScheduler: StewardScheduler;
+  let daemon: DispatchDaemon;
+  let testDbPath: string;
+  let systemEntity: EntityId;
+
+  beforeEach(async () => {
+    testDbPath = `/tmp/dispatch-daemon-recovery-steward-test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`;
+    const storage = createStorage({ path: testDbPath, create: true });
+    initializeSchema(storage);
+
+    api = createQuarryAPI(storage);
+    inboxService = createInboxService(storage);
+    agentRegistry = createAgentRegistry(api);
+    taskAssignment = createTaskAssignmentService(api);
+    dispatchService = createDispatchService(api, taskAssignment, agentRegistry);
+    sessionManager = createMockSessionManager();
+    worktreeManager = createMockWorktreeManager();
+    stewardScheduler = createMockStewardScheduler();
+
+    const { createEntity, EntityTypeValue } = await import('@stoneforge/core');
+    const entity = await createEntity({
+      name: 'test-system',
+      entityType: EntityTypeValue.SYSTEM,
+      createdBy: 'system:test' as EntityId,
+    });
+    const saved = await api.create(entity as unknown as Record<string, unknown> & { createdBy: EntityId });
+    systemEntity = saved.id as unknown as EntityId;
+
+    const config: DispatchDaemonConfig = {
+      pollIntervalMs: 100,
+      workerAvailabilityPollEnabled: false,
+      inboxPollEnabled: false,
+      stewardTriggerPollEnabled: false,
+      workflowTaskPollEnabled: false,
+      orphanRecoveryEnabled: true,
+      maxResumeAttemptsBeforeRecovery: 3,
+    };
+
+    daemon = createDispatchDaemon(
+      api,
+      agentRegistry,
+      sessionManager,
+      dispatchService,
+      worktreeManager,
+      taskAssignment,
+      stewardScheduler,
+      inboxService,
+      config
+    );
+  });
+
+  afterEach(async () => {
+    await daemon.stop();
+    if (fs.existsSync(testDbPath)) {
+      fs.unlinkSync(testDbPath);
+    }
+  });
+
+  async function createTestWorker(name: string): Promise<AgentEntity> {
+    return agentRegistry.registerWorker({
+      name,
+      workerMode: 'ephemeral',
+      createdBy: systemEntity,
+      maxConcurrentTasks: 1,
+    });
+  }
+
+  async function createTestRecoverySteward(name: string): Promise<AgentEntity> {
+    return agentRegistry.registerSteward({
+      name,
+      stewardFocus: 'recovery',
+      createdBy: systemEntity,
+      maxConcurrentTasks: 1,
+    });
+  }
+
+  /** Creates a stuck task assigned to a worker with resumeCount at or above the recovery threshold. */
+  async function createStuckTask(
+    title: string,
+    workerId: EntityId,
+    resumeCount: number = 3,
+  ): Promise<Task> {
+    const task = await createTask({
+      title,
+      createdBy: systemEntity,
+      status: TaskStatus.IN_PROGRESS,
+      assignee: workerId,
+    });
+    const saved = await api.create(task as unknown as Record<string, unknown> & { createdBy: EntityId }) as Task;
+
+    await api.update(saved.id, {
+      metadata: updateOrchestratorTaskMeta(undefined, {
+        assignedAgent: workerId,
+        branch: 'agent/test-worker/task-branch',
+        worktree: '/worktrees/test-worker/task',
+        sessionId: 'prev-session-stuck',
+        resumeCount,
+      }),
+    });
+
+    return (await api.get<Task>(saved.id))!;
+  }
+
+  test('retains worker assignment when steward session start fails', async () => {
+    const worker = await createTestWorker('stuck-worker');
+    const workerId = worker.id as unknown as EntityId;
+    await createTestRecoverySteward('recovery-steward-1');
+
+    const task = await createStuckTask('Stuck task - session fail', workerId);
+
+    // Mock startSession to throw (simulating rate limit / pool full)
+    (sessionManager.startSession as ReturnType<typeof mock>).mockImplementation(async () => {
+      throw new Error('Rate limited: too many concurrent sessions');
+    });
+
+    const result = await daemon.recoverOrphanedAssignments();
+
+    // The error should be caught — task should NOT be orphaned
+    expect(result.errors).toBe(1);
+
+    // Task should STILL be assigned to the original worker
+    const updatedTask = await api.get<Task>(task.id);
+    expect(updatedTask?.assignee as unknown as string).toBe(workerId as unknown as string);
+
+    // The orchestrator metadata should still point to the worker
+    const meta = getOrchestratorTaskMeta(updatedTask!.metadata as Record<string, unknown>);
+    expect(meta?.assignedAgent).toBe(workerId as unknown as string);
+  });
+
+  test('transfers task to steward when session starts successfully', async () => {
+    const worker = await createTestWorker('stuck-worker-ok');
+    const workerId = worker.id as unknown as EntityId;
+    const steward = await createTestRecoverySteward('recovery-steward-2');
+    const stewardId = steward.id as unknown as EntityId;
+
+    const task = await createStuckTask('Stuck task - success path', workerId);
+
+    const result = await daemon.recoverOrphanedAssignments();
+
+    expect(result.processed).toBe(1);
+    expect(result.errors).toBe(0);
+
+    // Task should now be assigned to the steward
+    const updatedTask = await api.get<Task>(task.id);
+    expect(updatedTask?.assignee as unknown as string).toBe(stewardId as unknown as string);
+
+    // The orchestrator metadata should point to the steward
+    const meta = getOrchestratorTaskMeta(updatedTask!.metadata as Record<string, unknown>);
+    expect(meta?.assignedAgent).toBe(stewardId as unknown as string);
+    expect(meta?.sessionId).toBeDefined();
+
+    // Session should have been started for the steward
+    expect(sessionManager.startSession).toHaveBeenCalledWith(
+      stewardId,
+      expect.objectContaining({
+        workingDirectory: '/worktrees/test-worker/task',
+        interactive: false,
+      })
+    );
+  });
+
+  test('terminates steward session when metadata update fails after successful session start', async () => {
+    const worker = await createTestWorker('stuck-worker-meta-fail');
+    const workerId = worker.id as unknown as EntityId;
+    const steward = await createTestRecoverySteward('recovery-steward-3');
+    const stewardId = steward.id as unknown as EntityId;
+
+    const task = await createStuckTask('Stuck task - metadata fail', workerId);
+
+    // Let startSession succeed, but make the subsequent api.update fail
+    // We need to intercept only the api.update calls that happen AFTER session start
+    const originalUpdate = api.update.bind(api);
+    let sessionStarted = false;
+
+    (sessionManager.startSession as ReturnType<typeof mock>).mockImplementation(async (agentId: EntityId, options?: StartSessionOptions) => {
+      sessionStarted = true;
+      const session: SessionRecord = {
+        id: `session-recovery-${Date.now()}`,
+        agentId,
+        agentRole: 'steward',
+        workerMode: 'ephemeral',
+        status: 'running',
+        workingDirectory: options?.workingDirectory,
+        worktree: options?.worktree,
+        createdAt: createTimestamp(),
+        startedAt: createTimestamp(),
+        lastActivityAt: createTimestamp(),
+      };
+      return { session, events: null };
+    });
+
+    // Override api.update to fail after session start for the task metadata update
+    const originalApiUpdate = api.update;
+    let updateCallCount = 0;
+    api.update = (async (...args: Parameters<typeof api.update>) => {
+      updateCallCount++;
+      // The first update after session start is the metadata transfer — make it fail.
+      // Prior updates (e.g. resumeCount increment) should succeed.
+      if (sessionStarted) {
+        throw new Error('Database write failed: disk full');
+      }
+      return originalUpdate(...args);
+    }) as typeof api.update;
+
+    const result = await daemon.recoverOrphanedAssignments();
+
+    // Restore original
+    api.update = originalApiUpdate;
+
+    // The metadata update error should be reported
+    expect(result.errors).toBe(1);
+
+    // Steward session should have been terminated to prevent orphan
+    expect(sessionManager.stopSession).toHaveBeenCalledWith(stewardId);
+
+    // Task should STILL be assigned to the original worker (not orphaned)
+    const updatedTask = await api.get<Task>(task.id);
+    expect(updatedTask?.assignee as unknown as string).toBe(workerId as unknown as string);
+  });
+});
