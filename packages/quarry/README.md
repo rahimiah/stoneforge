@@ -29,7 +29,7 @@ import { createQuarryAPI } from '@stoneforge/quarry/api';
 import type { Task } from '@stoneforge/core';
 
 // Create a StorageBackend (auto-detects Bun/Node runtime)
-const storage = createStorage('.stoneforge/db.sqlite');
+const storage = createStorage({ path: '.stoneforge/db.sqlite' });
 initializeSchema(storage);
 
 // Create the API
@@ -235,7 +235,7 @@ Creates a QuarryAPI instance. Requires a `StorageBackend` from `@stoneforge/stor
 import { createSyncService } from '@stoneforge/quarry/sync';
 import { createStorage, initializeSchema } from '@stoneforge/storage';
 
-const storage = createStorage('.stoneforge/db.sqlite');
+const storage = createStorage({ path: '.stoneforge/db.sqlite' });
 initializeSchema(storage);
 
 const sync = createSyncService(storage);

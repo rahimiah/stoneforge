@@ -35,7 +35,7 @@ import { createOrchestratorAPI } from '@stoneforge/smithy';
 import { createStorage, initializeSchema } from '@stoneforge/storage';
 
 // Create a storage backend and initialize the schema
-const storage = createStorage('.stoneforge/db.sqlite');
+const storage = createStorage({ path: '.stoneforge/db.sqlite' });
 initializeSchema(storage);
 
 // Create the OrchestratorAPI (extends QuarryAPI)
