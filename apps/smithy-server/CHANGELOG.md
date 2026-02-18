@@ -1,5 +1,44 @@
 # @stoneforge/smithy-server
 
+## 1.2.0
+
+### Minor Changes
+
+- a468899: Add server-side validation requiring playbook field when creating custom stewards in agent registration routes.
+- ff790e4: Add 'recovery' to valid steward focus values in agent API routes.
+
+### Patch Changes
+
+- 430695f: Migrate all console.log calls to use structured logger with log-level support. Server startup now displays the active log level.
+- Updated dependencies [c7c3a2e]
+- Updated dependencies [acf6ed0]
+- Updated dependencies [a468899]
+- Updated dependencies [4fc3f2a]
+- Updated dependencies [4fc3f2a]
+- Updated dependencies [bd78abd]
+- Updated dependencies [dd47614]
+- Updated dependencies [2cec11b]
+- Updated dependencies [dd47614]
+- Updated dependencies [dd47614]
+- Updated dependencies [9b92e7d]
+- Updated dependencies [bbd2d1f]
+- Updated dependencies [430695f]
+- Updated dependencies [c3030f7]
+- Updated dependencies [6ad6161]
+- Updated dependencies [6a03ab1]
+- Updated dependencies [6835442]
+- Updated dependencies [ff790e4]
+- Updated dependencies [2872120]
+- Updated dependencies [70dd977]
+- Updated dependencies [dfa164c]
+- Updated dependencies [ab58a62]
+- Updated dependencies [af0b8f3]
+  - @stoneforge/smithy@1.2.0
+  - @stoneforge/quarry@1.2.0
+  - @stoneforge/core@1.2.0
+  - @stoneforge/storage@1.2.0
+  - @stoneforge/shared-routes@1.2.0
+
 ## 1.1.0
 
 ### Patch Changes

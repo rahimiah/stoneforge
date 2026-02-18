@@ -1,5 +1,49 @@
 # @stoneforge/smithy
 
+## 1.2.0
+
+### Minor Changes
+
+- acf6ed0: Extend PATCH /api/agents/:id endpoint to support updating steward triggers with validation and scheduler re-registration
+- a468899: Add Custom Steward support: extend StewardFocus type with 'custom' option, add playbook field to StewardMetadata, integrate playbook-based workflow creation in steward-scheduler, and validate playbook on agent registration routes.
+- 4fc3f2a: Compute and return effective 'blocked' status in task API responses for tasks with unresolved dependencies
+- bbd2d1f: Fix docs/custom steward sessions not terminating after agent completes
+
+  - Detect agent completion signal in spawner: close headless session when a
+    non-error `result` message is received, breaking the for-await loop that
+    previously kept sessions running indefinitely
+  - Add idle timeout monitoring for spawned steward sessions (configurable,
+    default 2 minutes) with max duration safety net (default 30 minutes)
+  - Add steward-specific session reaping in dispatch daemon with configurable
+    `maxStewardSessionDurationMs` (default 30 minutes)
+
+- 430695f: Add structured logging framework with log-level filtering. New `createLogger` factory and `getLogLevel` utility support DEBUG, INFO, WARNING, and ERROR levels configurable via `LOG_LEVEL` environment variable. All server service console calls migrated to use leveled logger.
+- c3030f7: Add plan auto-completion polling to dispatch daemon. Plans where all non-tombstone tasks are closed are now automatically marked as completed during the daemon's polling cycle.
+- 6ad6161: Add `playbookId` field to StewardMetadata and RegisterStewardInput for referencing Workflow Templates by ID. The steward scheduler resolves playbookId at execution time, falling back to inline playbook content for backward compatibility. API routes accept either `playbook` or `playbookId` for custom steward creation.
+- 6a03ab1: Add optional provider and model fields to PoolAgentTypeConfig, allowing each agent type within a pool to specify which AI provider and model to use when spawning agents. Extends CLI --agentType format, API validation, and pool show display.
+- 6835442: Add improper session exit detection and recovery steward spawning to dispatch daemon. When a worker is resumed 3+ times without a status change, the daemon stops resuming and spawns a recovery steward instead.
+- ff790e4: Register recovery steward prompt in the prompt system: add 'recovery' to StewardFocus type, register steward-recovery.md in PROMPT_FILES, and update all validation, CLI, server routes, and test helpers to accept the new focus area.
+- 70dd977: Remove legacy steward types (health, ops, reminder) from type definitions, UI components, CLI help text, prompt files, and documentation. StewardFocus now only supports 'merge' and 'docs'.
+- dfa164c: Steward scheduler improvements: spawn agent sessions for docs/health/reminder/ops stewards instead of calling dedicated services directly, auto-register stewards with the scheduler on agent creation/update, register all stewards when the dispatch daemon starts the scheduler, add structured logging throughout the scheduler lifecycle, and fix duplicate timer bug in `scheduleNextRun` where the `finally` block created orphaned timers on overlapping cron ticks.
+
+### Patch Changes
+
+- c7c3a2e: Add 'custom' to steward focus CLI help text, option descriptions, and code comments so users can discover the custom focus option.
+- 2cec11b: Rename 31 bun-specific test files to use .bun.test.ts naming convention and add vitest.config.ts to exclude them from vitest collection. This prevents vitest from reporting false failures when trying to run bun:test imports.
+- 9b92e7d: Fix agent pool creation by using createEntity() factory to generate element IDs, resolving NOT NULL constraint violation on tags.element_id
+- ab58a62: Update @anthropic-ai/claude-agent-sdk from ^0.2.41 to ^0.2.45 and @opencode-ai/sdk from ^1.1.64 to ^1.2.6
+- af0b8f3: Add critical session exit rules to worker prompt and create recovery steward prompt
+- Updated dependencies [4fc3f2a]
+- Updated dependencies [bd78abd]
+- Updated dependencies [dd47614]
+- Updated dependencies [dd47614]
+- Updated dependencies [dd47614]
+- Updated dependencies [2872120]
+  - @stoneforge/quarry@1.2.0
+  - @stoneforge/core@1.2.0
+  - @stoneforge/storage@1.2.0
+  - @stoneforge/shared-routes@1.2.0
+
 ## 1.1.0
 
 ### Patch Changes
