@@ -33,6 +33,7 @@ import type {
   ChannelId,
   Team,
   WorkflowStatus,
+  OrgChartNode,
 } from '@stoneforge/core';
 import type { EmbeddingService } from '../services/embeddings/service.js';
 
@@ -862,6 +863,14 @@ export interface QuarryAPI {
    */
   getManagementChain(entityId: EntityId): Promise<Element[]>;
 
+  /**
+   * Gets the organizational chart structure.
+   *
+   * @param rootId - Optional root entity ID (if not provided, returns all root entities)
+   * @returns Array of org chart nodes (hierarchical structure)
+   */
+  getOrgChart(rootId?: EntityId): Promise<OrgChartNode[]>;
+
   // --------------------------------------------------------------------------
   // Task Operations
   // --------------------------------------------------------------------------
@@ -1345,6 +1354,19 @@ export interface QuarryAPI {
     targetId: ElementId,
     options?: { newName?: string; actor?: EntityId }
   ): Promise<{ target: Channel; sourceArchived: boolean; messagesMoved: number }>;
+
+  /**
+   * Send a direct message to another entity.
+   * Finds or creates a direct channel between sender and recipient, then sends the message.
+   *
+   * @param sender - The entity sending the message
+   * @param input - The message input including recipient, contentRef, etc.
+   * @returns The created message and channel information
+   */
+  sendDirectMessage(
+    sender: EntityId,
+    input: SendDirectMessageInput
+  ): Promise<SendDirectMessageResult>;
 
   // --------------------------------------------------------------------------
   // Team Operations
