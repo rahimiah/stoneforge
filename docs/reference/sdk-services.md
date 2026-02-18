@@ -116,9 +116,17 @@ blockedCache.removeApproval(blockedId, blockerId, approver, options?);
 For automatic status changes to/from `blocked`:
 
 ```typescript
-blockedCache.setStatusTransitionCallback((elementId, newStatus, reason) => {
-  // Called when element should transition to blocked/unblocked
-  return api.update(elementId, { status: newStatus });
+blockedCache.setStatusTransitionCallback({
+  onBlock: (elementId, previousStatus) => {
+    // Called when element should transition to blocked status
+    // previousStatus is saved for later restoration
+    api.update(elementId, { status: 'blocked' });
+  },
+  onUnblock: (elementId, statusToRestore) => {
+    // Called when element should transition from blocked status
+    // statusToRestore is the status saved when element was blocked
+    api.update(elementId, { status: statusToRestore });
+  },
 });
 ```
 
@@ -148,19 +156,22 @@ const priorityService = createPriorityService(storage);
 ### Methods
 
 ```typescript
-// Single task effective priority
-const result = await priorityService.calculateEffectivePriority(taskId);
+// Single task effective priority (synchronous)
+const result = priorityService.calculateEffectivePriority(taskId);
 // result.effectivePriority - highest priority from dependents
-// result.influencers - tasks that influenced the priority
+// result.dependentInfluencers - tasks that influenced the priority
+// result.basePriority - the task's own priority
+// result.isInfluenced - whether effective differs from base
 
-// Batch calculation
-const results = await priorityService.calculateEffectivePriorities(taskIds);
+// Batch calculation (synchronous)
+const results = priorityService.calculateEffectivePriorities(taskIds);
+// Returns Map<ElementId, EffectivePriorityResult>
 
-// Aggregate complexity (opposite direction!)
-const complexity = await priorityService.calculateAggregateComplexity(taskId);
+// Aggregate complexity (opposite direction!) (synchronous)
+const complexity = priorityService.calculateAggregateComplexity(taskId);
 
-// Enhance tasks with effective priority
-const enhanced = await priorityService.enhanceTasksWithEffectivePriority(tasks);
+// Enhance tasks with effective priority (synchronous)
+const enhanced = priorityService.enhanceTasksWithEffectivePriority(tasks);
 
 // Sort by effective priority
 priorityService.sortByEffectivePriority(tasks);  // WARNING: mutates array in place!
@@ -192,7 +203,9 @@ const inboxService = createInboxService(storage);
 ```typescript
 // Get inbox items
 const items = inboxService.getInbox(recipientId, filter?);
-const paginated = inboxService.getInboxPaginated(recipientId, { limit, offset, filter });
+const paginated = inboxService.getInboxPaginated(recipientId, filter?);
+// paginated.items - array of inbox items
+// paginated.total - total count (ignoring limit/offset)
 
 // Count
 const count = inboxService.getUnreadCount(recipientId);
@@ -203,12 +216,20 @@ inboxService.markAsUnread(itemId);
 inboxService.markAllAsRead(recipientId);
 inboxService.archive(itemId);
 
-// Create item (usually done automatically on message send)
-inboxService.createInboxItem({
+// Batch read
+const markedCount = inboxService.markAsReadBatch(itemIds);
+
+// Add item (usually done automatically on message send)
+inboxService.addToInbox({
   recipientId,
   messageId,
+  channelId,
   sourceType: 'direct' | 'mention',
 });
+
+// Delete (for cascade deletion)
+inboxService.deleteByMessage(messageId);
+inboxService.deleteByRecipient(recipientId);
 ```
 
 ### Filter Options
@@ -216,9 +237,12 @@ inboxService.createInboxItem({
 ```typescript
 interface InboxFilter {
   status?: InboxStatus | InboxStatus[];
-  sourceType?: InboxSourceType;
+  sourceType?: InboxSourceType | InboxSourceType[];
+  channelId?: ChannelId;
   after?: Timestamp;
   before?: Timestamp;
+  limit?: number;
+  offset?: number;
 }
 ```
 
@@ -272,25 +296,45 @@ const syncService = createSyncService(storage);
 ### Export
 
 ```typescript
-// Incremental (dirty elements only)
-await syncService.export();
+// Incremental export (dirty elements only)
+await syncService.export({ outputDir: '/path/to/output' });
 
 // Full export
-await syncService.export({ full: true });
+await syncService.export({ outputDir: '/path/to/output', full: true });
 
-// Export to specific path
-await syncService.export({ outputPath: '/path/to/elements.jsonl' });
+// Export with custom file names
+await syncService.export({
+  outputDir: '/path/to/output',
+  elementsFile: 'elements.jsonl',     // default
+  dependenciesFile: 'dependencies.jsonl', // default
+  includeEphemeral: false,            // default
+});
+
+// Synchronous export (for CLI and testing)
+syncService.exportSync({ outputDir: '/path/to/output', full: true });
+
+// Export to string (for API use)
+const { elements, dependencies } = syncService.exportToString();
 ```
 
 ### Import
 
 ```typescript
 // Standard import (merge)
-const result = await syncService.import(jsonlPath);
-// result.imported, result.skipped, result.conflicts
+const result = await syncService.import({ inputDir: '/path/to/input' });
+// result.elementsImported, result.elementsSkipped, result.conflicts
 
 // Force import (remote always wins)
-await syncService.import(jsonlPath, { force: true });
+await syncService.import({ inputDir: '/path/to/input', force: true });
+
+// Dry run (preview changes)
+await syncService.import({ inputDir: '/path/to/input', dryRun: true });
+
+// Synchronous import
+syncService.importSync({ inputDir: '/path/to/input' });
+
+// Import from strings (for API use)
+syncService.importFromStrings(elementsJsonl, dependenciesJsonl, { force: true });
 ```
 
 ### Related Files
@@ -356,9 +400,10 @@ import { EmbeddingService } from '@stoneforge/quarry/services';
 interface EmbeddingProvider {
   readonly name: string;
   readonly dimensions: number;
+  readonly isLocal: boolean;
   isAvailable(): Promise<boolean>;
-  embed(text: string): Promise<number[]>;
-  embedBatch(texts: string[]): Promise<number[][]>;
+  embed(text: string): Promise<Float32Array>;
+  embedBatch(texts: string[]): Promise<Float32Array[]>;
 }
 ```
 
@@ -412,10 +457,18 @@ const inboxService = createInboxService(storage);
 const idLengthCache = createIdLengthCache(storage);
 
 // Wire up auto-transitions
-blockedCache.setStatusTransitionCallback((elementId, newStatus, reason) => {
-  return storage.run(
-    'UPDATE elements SET data = json_set(data, "$.status", ?) WHERE id = ?',
-    [newStatus, elementId]
-  );
+blockedCache.setStatusTransitionCallback({
+  onBlock: (elementId, previousStatus) => {
+    storage.run(
+      'UPDATE elements SET data = json_set(data, "$.status", ?) WHERE id = ?',
+      ['blocked', elementId]
+    );
+  },
+  onUnblock: (elementId, statusToRestore) => {
+    storage.run(
+      'UPDATE elements SET data = json_set(data, "$.status", ?) WHERE id = ?',
+      [statusToRestore, elementId]
+    );
+  },
 });
 ```
