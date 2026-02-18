@@ -46,20 +46,29 @@ bun packages/quarry/src/bin/sf.ts
 
 | Command            | Description          |
 | ------------------ | -------------------- |
-| `sf task create`   | Create task          |
-| `sf task list`     | List tasks           |
+| `sf create <type>` | Create a new element |
+| `sf list [type]`   | List elements        |
 | `sf show <id>`     | Show element details |
 | `sf update <id>`   | Update element       |
 | `sf delete <id>`   | Delete element       |
+| `sf task create`   | Create task          |
+| `sf task list`     | List tasks           |
 
 ```bash
-# Create task
+# Create task (via top-level create)
+sf create task --title "Fix bug" --priority 2 --type bug
+
+# Create task (via task subcommand)
 sf task create --title "Fix bug" --priority 2 --type bug
 
 # Create task with description (creates a linked document)
 sf task create --title "Add login" -d "Implement OAuth login with Google and GitHub providers"
 
-# List tasks
+# List elements
+sf list task
+sf list task --status open
+
+# List tasks (via task subcommand)
 sf task list --status open
 
 # Show element
@@ -70,6 +79,128 @@ sf update abc123 --status closed
 
 # Delete element
 sf delete abc123
+```
+
+#### create
+
+Create a new element of the specified type. Currently supports task creation.
+
+```bash
+sf create <type> [options]
+```
+
+| Option                    | Description                                   |
+| ------------------------- | --------------------------------------------- |
+| `-t, --title <text>`      | Title for the element (required for tasks)    |
+| `-n, --name <text>`       | Alias for `--title`                           |
+| `-d, --description <text>`| Task description (creates a linked document)  |
+| `-p, --priority <1-5>`    | Priority level (1=critical, 5=minimal)        |
+| `-c, --complexity <1-5>`  | Complexity level (1=trivial, 5=very complex)  |
+| `--type <type>`           | Task type: bug, feature, task, chore          |
+| `-a, --assignee <id>`     | Assignee entity ID                            |
+| `--tag <tag>`             | Add a tag (can be repeated)                   |
+| `--plan <id\|name>`       | Plan ID or name to attach this task to        |
+
+```bash
+sf create task --title "Fix login bug" --priority 1 --type bug
+sf create task -t "Add dark mode" --tag ui --tag feature
+sf create task -t "New feature" -d "Detailed description here"
+sf create task -t "Implement feature X" --plan "My Plan Name"
+```
+
+#### list
+
+List elements with optional filtering.
+
+```bash
+sf list [type] [options]
+```
+
+| Option                  | Description                          |
+| ----------------------- | ------------------------------------ |
+| `-t, --type <type>`     | Filter by element type               |
+| `-s, --status <status>` | Filter by status (for tasks)         |
+| `-p, --priority <1-5>`  | Filter by priority (for tasks)       |
+| `-a, --assignee <id>`   | Filter by assignee (for tasks)       |
+| `--tag <tag>`           | Filter by tag (can be repeated for AND) |
+| `-l, --limit <n>`       | Maximum results (default: 50)        |
+| `-o, --offset <n>`      | Skip first n results (for pagination) |
+
+```bash
+sf list task
+sf list task --status open
+sf list --type task --priority 1 --status in_progress
+sf list --tag urgent
+sf list task --limit 20 --offset 40
+```
+
+#### show
+
+Display detailed information about an element.
+
+```bash
+sf show <id> [options]
+```
+
+| Option                 | Description                              |
+| ---------------------- | ---------------------------------------- |
+| `-e, --events`         | Include recent events/history            |
+| `--events-limit <n>`   | Maximum events to show (default: 10)     |
+
+```bash
+sf show el-abc123
+sf show el-abc123 --events
+sf show el-abc123 --events --events-limit 20
+sf show el-abc123 --json
+sf show inbox-abc123     # Show inbox item with message content
+```
+
+#### update
+
+Update fields on an existing element.
+
+```bash
+sf update <id> [options]
+```
+
+| Option                  | Description                                        |
+| ----------------------- | -------------------------------------------------- |
+| `-t, --title <text>`    | New title                                          |
+| `-p, --priority <1-5>`  | New priority (tasks only)                          |
+| `-c, --complexity <1-5>`| New complexity (tasks only)                        |
+| `-s, --status <status>` | New status (tasks only: open, in_progress, closed, deferred) |
+| `-a, --assignee <id>`   | New assignee (tasks only, empty string to unassign) |
+| `--tag <tag>`           | Replace all tags (can be repeated)                 |
+| `--add-tag <tag>`       | Add a tag (can be repeated)                        |
+| `--remove-tag <tag>`    | Remove a tag (can be repeated)                     |
+
+```bash
+sf update el-abc123 --title "New Title"
+sf update el-abc123 --priority 1 --status in_progress
+sf update el-abc123 --add-tag urgent --add-tag frontend
+sf update el-abc123 --remove-tag old-tag
+sf update el-abc123 --assignee ""  # Unassign
+```
+
+#### delete
+
+Soft-delete an element. The element is marked as deleted (tombstone) but not immediately removed.
+
+```bash
+sf delete <id> [options]
+```
+
+| Option                | Description                              |
+| --------------------- | ---------------------------------------- |
+| `-r, --reason <text>` | Deletion reason (recorded in audit trail) |
+| `-f, --force`         | Skip confirmation (for scripts)          |
+
+Note: Messages cannot be deleted as they are immutable.
+
+```bash
+sf delete el-abc123
+sf delete el-abc123 --reason "Duplicate entry"
+sf delete el-abc123 -f
 ```
 
 ## Serve Command
@@ -238,6 +369,105 @@ sf task describe el-abc123 --file description.md
 sf task describe el-abc123 --show
 ```
 
+#### task ready
+
+List ready (unblocked, open) tasks.
+
+| Option                 | Description                       |
+| ---------------------- | --------------------------------- |
+| `-a, --assignee <id>`  | Filter by assignee                |
+| `-p, --priority <1-5>` | Filter by priority                |
+| `-t, --type <type>`    | Filter by element type            |
+| `-l, --limit <n>`      | Maximum results                   |
+
+```bash
+sf task ready
+sf task ready --assignee alice
+sf task ready --priority 1
+sf task ready --type bug --limit 10
+```
+
+#### task backlog
+
+List backlog tasks.
+
+| Option                 | Description                       |
+| ---------------------- | --------------------------------- |
+| `-p, --priority <1-5>` | Filter by priority                |
+| `-l, --limit <n>`      | Maximum results                   |
+
+```bash
+sf task backlog
+sf task backlog --priority 1 --limit 20
+```
+
+#### task blocked
+
+List blocked tasks.
+
+| Option                 | Description                       |
+| ---------------------- | --------------------------------- |
+| `-a, --assignee <id>`  | Filter by assignee                |
+| `-p, --priority <1-5>` | Filter by priority                |
+| `-l, --limit <n>`      | Maximum results                   |
+
+```bash
+sf task blocked
+sf task blocked --assignee alice --priority 1
+```
+
+#### task close
+
+Close a task.
+
+| Option                | Description              |
+| --------------------- | ------------------------ |
+| `-r, --reason <text>` | Reason for closing       |
+
+```bash
+sf task close abc123
+sf task close abc123 --reason "Fixed in commit xyz"
+```
+
+#### task reopen
+
+Reopen a closed task.
+
+| Option                 | Description                                  |
+| ---------------------- | -------------------------------------------- |
+| `-m, --message <text>` | Message to append to task description        |
+
+```bash
+sf task reopen abc123
+sf task reopen abc123 --message "Reopening — issue not fully resolved"
+```
+
+#### task assign
+
+Assign a task to an entity.
+
+| Option           | Description                       |
+| ---------------- | --------------------------------- |
+| `-u, --unassign` | Remove assignment instead         |
+
+```bash
+sf task assign abc123 worker-1
+sf task assign abc123 worker-1 --unassign
+```
+
+#### task defer
+
+Defer a task until a future date.
+
+| Option             | Description                        |
+| ------------------ | ---------------------------------- |
+| `--until <date>`   | Date to defer until (ISO format)   |
+
+```bash
+sf task defer abc123 --until 2025-06-01
+sf task undefer abc123
+```
+
 #### task describe
 
 Set or show a task's description. Descriptions are stored as versioned documents.
@@ -331,7 +561,49 @@ sf dependency list abc123 -d both    # Both
 sf dependency tree abc123
 ```
 
+#### dependency add
+
+Add a dependency between two elements.
+
+| Option                 | Description                                           |
+| ---------------------- | ----------------------------------------------------- |
+| `-t, --type <type>`    | Dependency type (required): blocks, requires, relates |
+| `-m, --metadata <json>` | JSON metadata to attach to the dependency            |
+
+```bash
+sf dependency add --type=blocks A B
+sf dependency add --type=requires A B --metadata '{"reason": "data dependency"}'
+```
+
 **Semantics:** `sf dependency add --type=blocks A B` means A (blocked) is blocked BY B (blocker).
+
+#### dependency list
+
+List dependencies for an element.
+
+| Option                    | Description                                      |
+| ------------------------- | ------------------------------------------------ |
+| `-t, --type <type>`       | Filter by dependency type                        |
+| `-d, --direction <dir>`   | Direction: out, in, or both (default: both)      |
+
+```bash
+sf dependency list abc123
+sf dependency list abc123 -d out
+sf dependency list abc123 -d in --type blocks
+```
+
+#### dependency tree
+
+Show dependency tree for an element.
+
+| Option              | Description                       |
+| ------------------- | --------------------------------- |
+| `-d, --depth <n>`   | Maximum tree depth (default: 5)   |
+
+```bash
+sf dependency tree abc123
+sf dependency tree abc123 --depth 3
+```
 
 ## Entity Commands
 
@@ -343,6 +615,38 @@ sf dependency tree abc123
 | `sf entity clear-manager <entity>`         | Clear manager        |
 | `sf entity reports <manager>`              | Get direct reports   |
 | `sf entity chain <entity>`                 | Get management chain |
+
+#### entity register
+
+Register a new entity.
+
+| Option                    | Description                                         |
+| ------------------------- | --------------------------------------------------- |
+| `-t, --type <type>`       | Entity type: agent, human, or system (default: agent) |
+| `--public-key <key>`      | Base64-encoded Ed25519 public key                   |
+| `--tag <tag>`             | Add tag (can be repeated)                           |
+
+```bash
+sf entity register alice
+sf entity register alice --type human
+sf entity register bot-1 --type agent --tag worker --tag deploy
+sf entity register svc --type system --public-key "base64key..."
+```
+
+#### entity list
+
+List registered entities.
+
+| Option                | Description                       |
+| --------------------- | --------------------------------- |
+| `-t, --type <type>`   | Filter by entity type             |
+| `-l, --limit <n>`     | Maximum results                   |
+
+```bash
+sf entity list
+sf entity list --type agent
+sf entity list --type human --limit 10
+```
 
 ## Document Commands
 
@@ -359,6 +663,58 @@ sf dependency tree abc123
 | `sf document unarchive <id>`          | Unarchive document                            |
 | `sf document delete <id>`             | Delete document (soft-delete via tombstone)    |
 | `sf document reindex`                 | Reindex documents for FTS5 search             |
+
+#### document create
+
+Create a new document.
+
+| Option                  | Description                                    |
+| ----------------------- | ---------------------------------------------- |
+| `--title <text>`        | Document title                                 |
+| `-c, --content <text>`  | Document content (inline)                      |
+| `-f, --file <path>`     | Read content from file                         |
+| `-t, --type <type>`     | Document type: text, markdown, or json         |
+| `--category <cat>`      | Document category                              |
+| `--tag <tag>`           | Add tag (can be repeated)                      |
+| `-m, --metadata <json>` | JSON metadata                                  |
+
+#### document list
+
+List documents.
+
+| Option                   | Description                                           |
+| ------------------------ | ----------------------------------------------------- |
+| `-l, --limit <n>`        | Maximum results                                       |
+| `-t, --type <type>`      | Filter by document type                               |
+| `--category <cat>`       | Filter by category                                    |
+| `--status <status>`      | Filter by status: active or archived                  |
+| `-a, --all`              | Include archived documents                            |
+
+#### document show
+
+Show document content.
+
+| Option                    | Description                       |
+| ------------------------- | --------------------------------- |
+| `-V, --docVersion <ver>`  | Show specific version             |
+
+#### document search
+
+Full-text search documents.
+
+| Option                   | Description                       |
+| ------------------------ | --------------------------------- |
+| `--category <cat>`       | Filter by category                |
+| `--status <status>`      | Filter by status                  |
+| `-l, --limit <n>`        | Maximum results                   |
+
+#### document history
+
+Show version history for a document.
+
+| Option              | Description                       |
+| ------------------- | --------------------------------- |
+| `-l, --limit <n>`   | Maximum results                   |
 
 ```bash
 # Create document with category
@@ -460,6 +816,38 @@ sf embeddings search "authentication flow"
 | `sf plan tasks <id>`              | List tasks in plan                |
 | `sf plan auto-complete`           | Auto-complete active plans        |
 
+#### plan create
+
+Create a new plan.
+
+| Option                  | Description                                         |
+| ----------------------- | --------------------------------------------------- |
+| `-t, --title <text>`    | Plan title (required)                               |
+| `-s, --status <status>` | Initial status: draft (default) or active           |
+| `--tag <tag>`           | Add tag (can be repeated)                           |
+
+```bash
+sf plan create --title "Feature X"
+sf plan create --title "Hotfix" --status active
+sf plan create --title "Q3 Roadmap" --tag roadmap --tag q3
+```
+
+#### plan list
+
+List plans.
+
+| Option                  | Description                                         |
+| ----------------------- | --------------------------------------------------- |
+| `-s, --status <status>` | Filter by status: draft, active, completed, cancelled |
+| `--tag <tag>`           | Filter by tag (can be repeated for AND logic)       |
+| `-l, --limit <n>`       | Maximum results                                     |
+
+```bash
+sf plan list
+sf plan list --status active
+sf plan list --tag roadmap --limit 10
+```
+
 #### plan show
 
 Show plan details, optionally including its task list.
@@ -495,6 +883,34 @@ sf plan auto-complete --dry-run
 sf plan auto-complete --json
 ```
 
+#### plan cancel
+
+Cancel a plan.
+
+| Option                | Description              |
+| --------------------- | ------------------------ |
+| `-r, --reason <text>` | Reason for cancellation  |
+
+```bash
+sf plan cancel el-plan123
+sf plan cancel el-plan123 --reason "Superseded by new plan"
+```
+
+#### plan tasks
+
+List tasks belonging to a plan.
+
+| Option                  | Description                       |
+| ----------------------- | --------------------------------- |
+| `-s, --status <status>` | Filter by task status             |
+| `-l, --limit <n>`       | Maximum results                   |
+
+```bash
+sf plan tasks el-plan123
+sf plan tasks el-plan123 --status open
+sf plan tasks el-plan123 --status closed --limit 10
+```
+
 ### Draft Plan Workflow
 
 Plans default to `draft` status. **Tasks in draft plans are NOT dispatchable** — the dispatch daemon will not assign them to workers. This prevents premature dispatch before dependencies are set.
@@ -528,6 +944,53 @@ sf plan activate <plan-id>
 | `sf workflow delete <id>`       | Delete ephemeral          |
 | `sf workflow promote <id>`      | Promote to durable        |
 | `sf workflow gc`                | Garbage collect           |
+
+#### workflow list
+
+List workflows.
+
+| Option                  | Description                              |
+| ----------------------- | ---------------------------------------- |
+| `-s, --status <status>` | Filter by status                         |
+| `-e, --ephemeral`       | Show only ephemeral workflows            |
+| `-d, --durable`         | Show only durable workflows              |
+| `-l, --limit <n>`       | Maximum results                          |
+
+```bash
+sf workflow list
+sf workflow list --status active
+sf workflow list --ephemeral
+sf workflow list --durable --limit 10
+```
+
+#### workflow tasks
+
+List tasks in a workflow.
+
+| Option                  | Description                       |
+| ----------------------- | --------------------------------- |
+| `-r, --ready`           | Show only ready tasks             |
+| `-s, --status <status>` | Filter by task status             |
+| `-l, --limit <n>`       | Maximum results                   |
+
+```bash
+sf workflow tasks el-wf123
+sf workflow tasks el-wf123 --ready
+sf workflow tasks el-wf123 --status open --limit 20
+```
+
+#### workflow delete
+
+Delete a workflow.
+
+| Option          | Description                                   |
+| --------------- | --------------------------------------------- |
+| `-f, --force`   | Required for deleting durable workflows       |
+
+```bash
+sf workflow delete el-wf123
+sf workflow delete el-wf123 --force
+```
 
 #### workflow create
 
@@ -642,6 +1105,22 @@ sf channel create --type direct --direct el-user123
 sf channel create --name team --member el-a --member el-b
 ```
 
+#### channel list
+
+List channels.
+
+| Option                | Description                              |
+| --------------------- | ---------------------------------------- |
+| `-t, --type <type>`   | Filter by type: group or direct          |
+| `-m, --member <id>`   | Filter by member                         |
+| `-l, --limit <n>`     | Maximum results                          |
+
+```bash
+sf channel list
+sf channel list --type group
+sf channel list --member alice --limit 10
+```
+
 #### channel merge
 
 Merge all messages from a source channel into a target channel. Both channels must be group channels. The source channel is archived after the merge.
@@ -716,6 +1195,34 @@ sf message reply el-msg123 --content "Thanks for the update!"
 sf --from bot message reply el-msg123 -m "Automated response"
 ```
 
+#### message list
+
+List messages in a channel.
+
+| Option                 | Description                              |
+| ---------------------- | ---------------------------------------- |
+| `-c, --channel <id>`   | Channel ID (required)                    |
+| `-s, --sender <id>`    | Filter by sender                         |
+| `-l, --limit <n>`      | Maximum results                          |
+
+```bash
+sf message list --channel el-ch123
+sf message list --channel el-ch123 --sender alice --limit 20
+```
+
+#### message thread
+
+View thread messages for a message.
+
+| Option              | Description                       |
+| ------------------- | --------------------------------- |
+| `-l, --limit <n>`   | Maximum results                   |
+
+```bash
+sf message thread el-msg123
+sf message thread el-msg123 --limit 50
+```
+
 ## Team Commands
 
 | Command                          | Description   |
@@ -725,6 +1232,51 @@ sf --from bot message reply el-msg123 -m "Automated response"
 | `sf team add <team> <entity>`    | Add member    |
 | `sf team remove <team> <entity>` | Remove member |
 | `sf team members <id>`           | List members  |
+| `sf team delete <id>`            | Delete team   |
+
+#### team create
+
+Create a new team.
+
+| Option                | Description                       |
+| --------------------- | --------------------------------- |
+| `-n, --name <name>`   | Team name (required)              |
+| `-m, --member <id>`   | Add member (can be repeated)      |
+| `--tag <tag>`         | Add tag (can be repeated)         |
+
+```bash
+sf team create --name "Backend Team"
+sf team create --name "Frontend" --member alice --member bob --tag frontend
+```
+
+#### team list
+
+List teams.
+
+| Option                | Description                       |
+| --------------------- | --------------------------------- |
+| `-m, --member <id>`   | Filter by member                  |
+| `-l, --limit <n>`     | Maximum results                   |
+
+```bash
+sf team list
+sf team list --member alice
+sf team list --limit 10
+```
+
+#### team delete
+
+Delete a team.
+
+| Option                | Description              |
+| --------------------- | ------------------------ |
+| `-r, --reason <text>` | Reason for deletion      |
+| `-f, --force`         | Skip confirmation        |
+
+```bash
+sf team delete el-team123
+sf team delete el-team123 --reason "Team dissolved" --force
+```
 
 ## Library Commands
 
@@ -739,6 +1291,31 @@ sf --from bot message reply el-msg123 -m "Automated response"
 | `sf library remove <lib> <doc>`     | Remove document from library     |
 | `sf library nest <child> <parent>`  | Nest a library under another     |
 | `sf library delete <id>`            | Delete a library                 |
+
+#### library create
+
+Create a new library.
+
+| Option                | Description                       |
+| --------------------- | --------------------------------- |
+| `-n, --name <name>`   | Library name (required)           |
+| `--tag <tag>`         | Add tag (can be repeated)         |
+
+#### library list
+
+List libraries.
+
+| Option              | Description                       |
+| ------------------- | --------------------------------- |
+| `-l, --limit <n>`   | Maximum results                   |
+
+#### library delete
+
+Delete a library.
+
+| Option          | Description                       |
+| --------------- | --------------------------------- |
+| `-f, --force`   | Skip confirmation                 |
 
 ```bash
 # Create a library
@@ -820,11 +1397,16 @@ sf playbook create -n deploy -t "Deploy" -v "env:string" -v "debug:boolean:false
 
 ## Sync Commands
 
+Sync commands manage the JSONL-based import/export workflow. These commands are also available under the `sf sync` parent command.
+
 | Command            | Description       |
 | ------------------ | ----------------- |
 | `sf export`        | Export to JSONL   |
 | `sf import`        | Import from JSONL |
 | `sf status`        | Show sync status  |
+| `sf sync export`   | Export to JSONL (alias)   |
+| `sf sync import`   | Import from JSONL (alias) |
+| `sf sync status`   | Show sync status (alias)  |
 
 #### export
 
