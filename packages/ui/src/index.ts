@@ -44,3 +44,15 @@ export * from './documents';
 
 // Message Module (also available via '@stoneforge/ui/message')
 export * from './message';
+
+// Workflows Module (also available via '@stoneforge/ui/workflows')
+export * from './workflows';
+
+// Resolve export name conflicts introduced by workflows re-export:
+// Domain types take precedence for TaskStatus, Workflow, WorkflowStatus (different definitions)
+export type { TaskStatus, Workflow, WorkflowStatus } from './domain';
+// Domain WorkflowCard component takes precedence (display-layer card)
+export { WorkflowCard } from './domain';
+// Plans components/utils take precedence for StatusBadge, StatusFilter, TaskStatusSummary, formatRelativeTime
+export { StatusBadge, StatusFilter, TaskStatusSummary } from './plans';
+export { formatRelativeTime } from './plans';
