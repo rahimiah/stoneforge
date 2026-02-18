@@ -307,8 +307,7 @@ describe('DispatchDaemon Integration', () => {
       );
     });
 
-    test.skip('dispatches highest priority task first', async () => {
-      // TODO: Debug priority sorting - basic dispatch works, priority ordering needs investigation
+    test('dispatches highest priority task first', async () => {
       // 1. Register worker
       const worker = await createTestWorker('dave');
 
