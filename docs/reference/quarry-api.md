@@ -132,7 +132,7 @@ const result = await api.listPaginated({
 
 ```typescript
 const results = await api.search('keyword', {
-  types: ['task', 'document'],
+  type: ['task', 'document'],  // singular 'type', accepts ElementType | ElementType[]
 });
 ```
 
@@ -177,6 +177,13 @@ const readyIncludingEphemeral = await api.ready({ includeEphemeral: true });
 - Future-scheduled tasks (scheduledFor > now)
 - Ephemeral workflow tasks (unless `includeEphemeral: true`)
 
+### Backlog tasks (not ready, needs triage)
+
+```typescript
+const backlog = await api.backlog();
+const filtered = await api.backlog({ priority: 1 });
+```
+
 ### Blocked tasks
 
 ```typescript
@@ -205,7 +212,7 @@ await api.addDependency({
   blockedId: taskA,
   blockerId: taskB,
   type: 'blocks',
-  createdBy: actorId,
+  actor: actorId,  // optional, falls back to blocked element's createdBy
 });
 ```
 
@@ -272,7 +279,11 @@ await api.deleteWorkflow(workflowId);  // Hard delete
 await api.garbageCollectWorkflows({ maxAgeMs: 7 * 24 * 60 * 60 * 1000 });  // 7 days
 ```
 
-**Note:** `garbageCollectWorkflows()` uses `maxAgeMs` (milliseconds), not string like `'7d'`.
+```typescript
+await api.garbageCollectTasks({ maxAgeMs: 7 * 24 * 60 * 60 * 1000 });   // 7 days
+```
+
+**Note:** `garbageCollectWorkflows()` and `garbageCollectTasks()` use `maxAgeMs` (milliseconds), not string like `'7d'`.
 
 ---
 
@@ -283,23 +294,6 @@ const { channel, created } = await api.findOrCreateDirectChannel(entityA, entity
 await api.addChannelMember(channelId, entityId, options?);
 await api.removeChannelMember(channelId, entityId, options?);
 await api.leaveChannel(channelId, actor);
-```
-
-### Send direct message
-
-```typescript
-// Content must be a Document - create it first!
-const contentDoc = await api.create({
-  type: 'document',
-  createdBy: senderId,
-  content: 'message text',
-  contentType: 'text',
-});
-
-const result = await api.sendDirectMessage(senderId, {
-  recipient: entityB,        // Note: 'recipient' not 'recipientId'
-  contentRef: contentDoc.id, // Note: DocumentId, not raw text
-});
 ```
 
 ### Merge channels
@@ -355,7 +349,6 @@ await api.setEntityManager(entityId, managerId, actor);  // actor required
 await api.clearEntityManager(entityId, actor);           // actor required
 const reports = await api.getDirectReports(managerId);
 const chain = await api.getManagementChain(entityId);
-const chart = await api.getOrgChart();
 ```
 
 ---
@@ -462,6 +455,7 @@ Documents must use one of the following categories (defaults to `other` if omitt
 ```typescript
 const events = await api.getEvents(elementId);
 const allEvents = await api.listEvents({ type: 'created' });
+const count = await api.countEvents({ elementId: elementId });
 const version = await api.getDocumentVersion(docId, versionNum);
 const history = await api.getDocumentHistory(docId);
 const snapshot = await api.reconstructAtTime(elementId, timestamp);
@@ -473,11 +467,29 @@ const timeline = await api.getElementTimeline(elementId);
 ## Sync Operations
 
 ```typescript
-await api.export();                    // Export dirty elements
-await api.export({ full: true });      // Full export
-await api.import(jsonlPath);
-await api.import(jsonlPath, { force: true });  // Remote always wins
+await api.export();                                          // Export with defaults
+await api.export({ outputPath: './export.jsonl' });          // Export to file
+await api.export({ includeDeleted: true });                  // Include soft-deleted
+await api.import({ inputPath: './export.jsonl' });           // Import from file
+await api.import({ data: jsonlString });                     // Import from string
+await api.import({ inputPath: './data.jsonl', dryRun: true }); // Validate without importing
 ```
+
+**ExportOptions:**
+- `format?` — Export format (default: `'jsonl'`)
+- `types?` — Element types to export (default: all)
+- `modifiedAfter?` — Only elements modified after this timestamp
+- `includeDeleted?` — Include soft-deleted elements
+- `includeDependencies?` — Export dependencies
+- `includeEvents?` — Export events
+- `outputPath?` — Output file path (if not provided, returns string)
+
+**ImportOptions:**
+- `inputPath?` — Input file path
+- `data?` — Raw JSONL data (alternative to `inputPath`)
+- `conflictStrategy?` — `'skip'` | `'overwrite'` | `'error'` (default: `'error'`)
+- `validateFirst?` — Validate all data before importing
+- `dryRun?` — Validate but don't import
 
 **Note:** `syncStatus()` is not exposed. Use `sf status` CLI command.
 
@@ -490,10 +502,6 @@ call `api.reindexAllDocumentsFTS()` to rebuild the search index.
 
 ```typescript
 const stats = await api.stats();
-
-// Rebuild blocked cache from scratch
-const result = await api.rebuildBlockedCache();
-// { elementsChecked: number, elementsBlocked: number, durationMs: number }
 ```
 
 ---
