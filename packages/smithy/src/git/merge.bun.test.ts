@@ -571,6 +571,96 @@ describe('mergeBranch pre-flight conflict detection', () => {
   });
 });
 
+// ============================================================================
+// Already-merged / zero-commits-ahead detection tests
+// ============================================================================
+
+describe('mergeBranch already-merged detection', () => {
+  test('returns alreadyMerged when branch has zero commits ahead (with remote)', async () => {
+    const { repoDir, remoteDir } = await setup();
+    try {
+      // Create and merge a feature branch so it has zero commits ahead
+      await execAsync('git checkout -b feature/already-merged', { cwd: repoDir });
+      fs.writeFileSync(path.join(repoDir, 'already.ts'), 'export const x = 1;\n');
+      await execAsync('git add . && git commit -m "Feature commit"', { cwd: repoDir });
+      await execAsync('git push origin feature/already-merged', { cwd: repoDir });
+
+      // Now merge the feature into main manually (simulating a previous merge)
+      await execAsync('git checkout main', { cwd: repoDir });
+      await execAsync('git merge feature/already-merged', { cwd: repoDir });
+      await execAsync('git push origin main', { cwd: repoDir });
+
+      // Now try to merge again — should detect already-merged
+      const result = await mergeBranch({
+        workspaceRoot: repoDir,
+        sourceBranch: 'feature/already-merged',
+        targetBranch: 'main',
+        commitMessage: 'Should not merge',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.alreadyMerged).toBe(true);
+      expect(result.hasConflict).toBe(false);
+      expect(result.commitHash).toBeUndefined();
+    } finally {
+      cleanup(repoDir, remoteDir);
+    }
+  });
+
+  test('returns alreadyMerged when branch has zero commits ahead (local-only)', async () => {
+    const repoDir = await createTestRepo();
+    try {
+      // Create and merge a feature branch
+      await execAsync('git checkout -b feature/local-already-merged', { cwd: repoDir });
+      fs.writeFileSync(path.join(repoDir, 'local-already.ts'), 'export const y = 2;\n');
+      await execAsync('git add . && git commit -m "Local feature"', { cwd: repoDir });
+
+      await execAsync('git checkout main', { cwd: repoDir });
+      await execAsync('git merge feature/local-already-merged', { cwd: repoDir });
+
+      // Now try to merge again — should detect already-merged
+      const result = await mergeBranch({
+        workspaceRoot: repoDir,
+        sourceBranch: 'feature/local-already-merged',
+        targetBranch: 'main',
+        commitMessage: 'Should not merge',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.alreadyMerged).toBe(true);
+      expect(result.hasConflict).toBe(false);
+      expect(result.commitHash).toBeUndefined();
+    } finally {
+      rmrf(repoDir);
+    }
+  });
+
+  test('does NOT return alreadyMerged when branch has commits ahead', async () => {
+    const { repoDir, remoteDir } = await setup();
+    try {
+      await execAsync('git checkout -b feature/not-yet-merged', { cwd: repoDir });
+      fs.writeFileSync(path.join(repoDir, 'not-merged.ts'), 'export const z = 3;\n');
+      await execAsync('git add . && git commit -m "Not yet merged"', { cwd: repoDir });
+      await execAsync('git push origin feature/not-yet-merged', { cwd: repoDir });
+      await execAsync('git checkout main', { cwd: repoDir });
+
+      const result = await mergeBranch({
+        workspaceRoot: repoDir,
+        sourceBranch: 'feature/not-yet-merged',
+        targetBranch: 'main',
+        commitMessage: 'Normal merge',
+        syncLocal: false,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.alreadyMerged).toBeUndefined();
+      expect(result.commitHash).toBeDefined();
+    } finally {
+      cleanup(repoDir, remoteDir);
+    }
+  });
+});
+
 describe('syncLocalBranchFromCommit', () => {
   test('updates target branch ref to commit hash when not on target branch', async () => {
     const repoDir = await createTestRepo();

@@ -149,6 +149,8 @@ export interface MergeAttemptResult {
   error?: string;
   /** Files with conflicts if any */
   conflictFiles?: string[];
+  /** Whether the source branch was already fully merged (zero commits ahead) */
+  alreadyMerged?: boolean;
 }
 
 /**
@@ -410,6 +412,23 @@ export class MergeStewardServiceImpl implements MergeStewardService {
         };
       }
 
+      // 2a. Check if the branch has any commits ahead of the target.
+      // If the branch is already fully merged (zero commits ahead), there's
+      // nothing to test or merge — mark as not_applicable and close the task.
+      const branchHasCommits = await this.branchHasCommitsAhead(orchestratorMeta.branch);
+      if (!branchHasCommits) {
+        logger.info(
+          `Task ${taskId} branch "${orchestratorMeta.branch}" has zero commits ahead of target — already merged`
+        );
+        await this.updateMergeStatus(taskId, 'not_applicable');
+        return {
+          taskId,
+          status: 'not_applicable',
+          merged: false,
+          processedAt,
+        };
+      }
+
       // 2. Run tests (unless skipped)
       let testResult: TestResult | undefined;
       if (!options.skipTests) {
@@ -452,6 +471,20 @@ export class MergeStewardServiceImpl implements MergeStewardService {
 
       await this.updateMergeStatus(taskId, 'merging');
       const mergeResult = await this.attemptMerge(taskId, options.mergeCommitMessage);
+
+      // Handle already-merged result from mergeBranch() — secondary safety net
+      // in case the early branchHasCommitsAhead check didn't trigger (e.g. race)
+      if (mergeResult.alreadyMerged) {
+        logger.info(`Task ${taskId} branch already merged (detected during merge attempt)`);
+        await this.updateMergeStatus(taskId, 'not_applicable');
+        return {
+          taskId,
+          status: 'not_applicable',
+          merged: false,
+          testResult,
+          processedAt,
+        };
+      }
 
       if (!mergeResult.success) {
         if (mergeResult.hasConflict) {
@@ -945,6 +978,44 @@ export class MergeStewardServiceImpl implements MergeStewardService {
         activeStatuses.includes(task.status)
       );
     });
+  }
+
+  /**
+   * Checks whether a branch has any commits ahead of the target branch.
+   * Returns true if there are commits to merge, false if the branch is
+   * already fully merged (zero commits ahead).
+   */
+  private async branchHasCommitsAhead(sourceBranch: string): Promise<boolean> {
+    const targetBranch = await this.getTargetBranch();
+    const remoteExists = await hasRemote(this.config.workspaceRoot);
+
+    try {
+      // When remote exists, fetch first and compare remote refs
+      if (remoteExists) {
+        await execAsync('git fetch origin', {
+          cwd: this.config.workspaceRoot,
+          encoding: 'utf8',
+        });
+        const targetRef = `origin/${targetBranch}`;
+        const sourceRef = `origin/${sourceBranch}`;
+        const { stdout } = await execAsync(
+          `git rev-list --count ${targetRef}..${sourceRef}`,
+          { cwd: this.config.workspaceRoot, encoding: 'utf8' }
+        );
+        return parseInt(stdout.trim(), 10) > 0;
+      }
+
+      // Local-only: compare local refs
+      const { stdout } = await execAsync(
+        `git rev-list --count ${targetBranch}..${sourceBranch}`,
+        { cwd: this.config.workspaceRoot, encoding: 'utf8' }
+      );
+      return parseInt(stdout.trim(), 10) > 0;
+    } catch {
+      // If we can't determine, assume there are commits to merge
+      // and let the normal merge flow handle errors
+      return true;
+    }
   }
 
   private async getTargetBranch(): Promise<string> {

@@ -864,6 +864,133 @@ describe('MergeStewardService', () => {
       // Should not have run tests
       expect(api.update).not.toHaveBeenCalled();
     });
+
+    // Skip git command tests in bun where vi.mock doesn't work
+    const isBun = typeof globalThis.Bun !== 'undefined';
+    const itGit = isBun ? it.skip : it;
+
+    itGit('should set not_applicable when branch has zero commits ahead of target', async () => {
+      const mockTask = createMockTask({
+        status: TaskStatus.REVIEW,
+        metadata: {
+          orchestrator: {
+            branch: 'agent/worker/task-branch',
+            assignedAgent: 'agent-worker-001',
+            mergeStatus: 'pending',
+          },
+        },
+      });
+
+      // First call: processTask gets the task
+      // Second call: branchHasCommitsAhead -> getTargetBranch -> api.get for worktreeManager.getDefaultBranch
+      // Third+ calls: updateMergeStatus -> api.get
+      (api.get as MockInstance).mockResolvedValue(mockTask);
+      (api.update as MockInstance).mockImplementation((_id, updates) =>
+        Promise.resolve({ ...mockTask, ...updates } as Task)
+      );
+
+      // Mock exec to return 0 commits ahead for the rev-list call
+      const cp = await import('node:child_process');
+      (cp.exec as unknown as MockInstance).mockImplementation(
+        (cmd: string, _opts: unknown, cb?: Function) => {
+          const callback = typeof _opts === 'function' ? (_opts as unknown as Function) : cb;
+          if (callback) {
+            if ((cmd as string).includes('rev-list --count')) {
+              callback(null, { stdout: '0\n', stderr: '' });
+            } else if ((cmd as string).includes('remote get-url')) {
+              // hasRemote returns false (no remote)
+              callback(new Error('no remote'), { stdout: '', stderr: '' });
+            } else {
+              callback(null, { stdout: '', stderr: '' });
+            }
+          }
+        }
+      );
+
+      const result = await service.processTask(mockTask.id);
+
+      expect(result.status).toBe('not_applicable');
+      expect(result.merged).toBe(false);
+      // Should have called updateMergeStatus with 'not_applicable'
+      expect(api.update).toHaveBeenCalledWith(
+        mockTask.id,
+        expect.objectContaining({
+          status: TaskStatus.CLOSED,
+          metadata: expect.objectContaining({
+            orchestrator: expect.objectContaining({
+              mergeStatus: 'not_applicable',
+            }),
+          }),
+        })
+      );
+    });
+
+    itGit('should proceed with tests when branch has commits ahead', async () => {
+      const mockTask = createMockTask({
+        status: TaskStatus.REVIEW,
+        metadata: {
+          orchestrator: {
+            branch: 'agent/worker/task-branch',
+            worktree: '.stoneforge/.worktrees/worker-test',
+            assignedAgent: 'agent-worker-001',
+            mergeStatus: 'pending',
+          },
+        },
+      });
+
+      (api.get as MockInstance).mockResolvedValue(mockTask);
+      (api.update as MockInstance).mockImplementation((_id, updates) =>
+        Promise.resolve({ ...mockTask, ...updates } as Task)
+      );
+
+      // Mock exec to return >0 commits ahead, then fail on test run
+      const cp = await import('node:child_process');
+      (cp.exec as unknown as MockInstance).mockImplementation(
+        (cmd: string, opts: unknown, cb?: Function) => {
+          const callback = typeof opts === 'function' ? (opts as unknown as Function) : cb;
+          if (callback) {
+            if ((cmd as string).includes('rev-list --count')) {
+              callback(null, { stdout: '3\n', stderr: '' });
+            } else if ((cmd as string).includes('remote get-url')) {
+              callback(new Error('no remote'), { stdout: '', stderr: '' });
+            } else if ((cmd as string) === config.testCommand) {
+              // Tests fail — so we get test_failed status
+              callback(new Error('tests failed'), { stdout: 'FAIL', stderr: '' });
+            } else {
+              callback(null, { stdout: '', stderr: '' });
+            }
+          }
+        }
+      );
+
+      // Mock the worktree manager so runTests works
+      (worktreeManager.getWorktree as MockInstance).mockResolvedValue({
+        path: '/project/.stoneforge/.worktrees/worker-test',
+        branch: 'agent/worker/task-branch',
+      });
+      (api.list as MockInstance).mockResolvedValue([]); // No existing fix tasks
+      (api.create as MockInstance).mockResolvedValue({
+        ...mockTask,
+        id: 'task-fix-001' as ElementId,
+      });
+      (agentRegistry.getAgentChannel as MockInstance).mockResolvedValue(undefined);
+
+      const result = await service.processTask(mockTask.id);
+
+      // Should have proceeded to testing (not returned not_applicable)
+      expect(result.status).toBe('test_failed');
+      // updateMergeStatus should have been called with 'testing' first
+      expect(api.update).toHaveBeenCalledWith(
+        mockTask.id,
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            orchestrator: expect.objectContaining({
+              mergeStatus: 'testing',
+            }),
+          }),
+        })
+      );
+    });
   });
 
   // ----------------------------------------

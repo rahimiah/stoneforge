@@ -66,6 +66,8 @@ export interface MergeBranchResult {
   error?: string;
   /** Files with conflicts, if any */
   conflictFiles?: string[];
+  /** Whether the source branch was already fully merged into the target (zero commits ahead) */
+  alreadyMerged?: boolean;
 }
 
 // ============================================================================
@@ -203,6 +205,28 @@ export async function mergeBranch(options: MergeBranchOptions): Promise<MergeBra
   // 1. Fetch latest remote state (skip when local-only)
   if (!localOnly) {
     await execAsync('git fetch origin', { cwd: workspaceRoot, encoding: 'utf8' });
+  }
+
+  // 1b. Check if source branch has any commits ahead of target.
+  // If count is 0, the branch is already fully merged — nothing to do.
+  try {
+    const targetRef = localOnly ? targetBranch : `origin/${targetBranch}`;
+    const sourceRef = localOnly ? sourceBranch : `origin/${sourceBranch}`;
+    const { stdout: countStr } = await execAsync(
+      `git rev-list --count ${targetRef}..${sourceRef}`,
+      { cwd: workspaceRoot, encoding: 'utf8' }
+    );
+    const commitsAhead = parseInt(countStr.trim(), 10);
+    if (commitsAhead === 0) {
+      return {
+        success: true,
+        hasConflict: false,
+        alreadyMerged: true,
+      };
+    }
+  } catch {
+    // If rev-list fails (e.g. branch doesn't exist on remote), continue
+    // with the normal merge flow which will produce a proper error.
   }
 
   // 2. Pre-flight conflict detection via merge-tree
