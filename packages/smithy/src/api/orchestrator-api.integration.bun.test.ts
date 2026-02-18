@@ -135,6 +135,80 @@ describe('OrchestratorAPI', () => {
       expect(meta.stewardFocus).toBe('docs');
       expect(meta.triggers?.[0]).toEqual({ type: 'cron', schedule: '0 2 * * *' });
     });
+
+    test('registerDirector persists provider, model, and executablePath', async () => {
+      const director = await api.registerDirector({
+        name: 'ProviderDirector',
+        createdBy: systemEntity,
+        provider: 'claude',
+        model: 'claude-sonnet-4-20250514',
+        executablePath: '/usr/local/bin/claude',
+      });
+
+      const meta = getAgentMetadata(director);
+      expect(meta).toBeDefined();
+      expect(meta?.provider).toBe('claude');
+      expect(meta?.model).toBe('claude-sonnet-4-20250514');
+      expect(meta?.executablePath).toBe('/usr/local/bin/claude');
+
+      // Verify the fields survive a round-trip through the database
+      const fetched = await api.getAgent(director.id as unknown as EntityId);
+      expect(fetched).toBeDefined();
+      const fetchedMeta = getAgentMetadata(fetched!);
+      expect(fetchedMeta?.provider).toBe('claude');
+      expect(fetchedMeta?.model).toBe('claude-sonnet-4-20250514');
+      expect(fetchedMeta?.executablePath).toBe('/usr/local/bin/claude');
+    });
+
+    test('registerWorker persists provider, model, and executablePath', async () => {
+      const worker = await api.registerWorker({
+        name: 'ProviderWorker',
+        workerMode: 'ephemeral',
+        createdBy: systemEntity,
+        provider: 'claude',
+        model: 'claude-sonnet-4-20250514',
+        executablePath: '/usr/local/bin/claude',
+      });
+
+      const meta = getAgentMetadata(worker);
+      expect(meta).toBeDefined();
+      expect(meta?.provider).toBe('claude');
+      expect(meta?.model).toBe('claude-sonnet-4-20250514');
+      expect(meta?.executablePath).toBe('/usr/local/bin/claude');
+
+      // Verify the fields survive a round-trip through the database
+      const fetched = await api.getAgent(worker.id as unknown as EntityId);
+      expect(fetched).toBeDefined();
+      const fetchedMeta = getAgentMetadata(fetched!);
+      expect(fetchedMeta?.provider).toBe('claude');
+      expect(fetchedMeta?.model).toBe('claude-sonnet-4-20250514');
+      expect(fetchedMeta?.executablePath).toBe('/usr/local/bin/claude');
+    });
+
+    test('registerSteward persists provider, model, and executablePath', async () => {
+      const steward = await api.registerSteward({
+        name: 'ProviderSteward',
+        stewardFocus: 'merge',
+        createdBy: systemEntity,
+        provider: 'claude',
+        model: 'claude-sonnet-4-20250514',
+        executablePath: '/usr/local/bin/claude',
+      });
+
+      const meta = getAgentMetadata(steward);
+      expect(meta).toBeDefined();
+      expect(meta?.provider).toBe('claude');
+      expect(meta?.model).toBe('claude-sonnet-4-20250514');
+      expect(meta?.executablePath).toBe('/usr/local/bin/claude');
+
+      // Verify the fields survive a round-trip through the database
+      const fetched = await api.getAgent(steward.id as unknown as EntityId);
+      expect(fetched).toBeDefined();
+      const fetchedMeta = getAgentMetadata(fetched!);
+      expect(fetchedMeta?.provider).toBe('claude');
+      expect(fetchedMeta?.model).toBe('claude-sonnet-4-20250514');
+      expect(fetchedMeta?.executablePath).toBe('/usr/local/bin/claude');
+    });
   });
 
   describe('Agent Queries', () => {

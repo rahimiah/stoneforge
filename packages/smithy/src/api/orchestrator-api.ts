@@ -254,6 +254,9 @@ export class OrchestratorAPIImpl extends QuarryAPIImpl implements OrchestratorAP
       sessionStatus: 'idle',
       maxConcurrentTasks: input.maxConcurrentTasks,
       roleDefinitionRef: input.roleDefinitionRef,
+      provider: input.provider,
+      model: input.model,
+      executablePath: input.executablePath,
     };
 
     // Create the entity with agent metadata nested under the agent key
@@ -289,6 +292,9 @@ export class OrchestratorAPIImpl extends QuarryAPIImpl implements OrchestratorAP
       sessionStatus: 'idle',
       maxConcurrentTasks: input.maxConcurrentTasks,
       roleDefinitionRef: input.roleDefinitionRef,
+      provider: input.provider,
+      model: input.model,
+      executablePath: input.executablePath,
     };
 
     // Create the entity with agent metadata nested under the agent key
@@ -325,6 +331,9 @@ export class OrchestratorAPIImpl extends QuarryAPIImpl implements OrchestratorAP
       sessionStatus: 'idle',
       maxConcurrentTasks: input.maxConcurrentTasks,
       roleDefinitionRef: input.roleDefinitionRef,
+      provider: input.provider,
+      model: input.model,
+      executablePath: input.executablePath,
     };
 
     // Create the entity with agent metadata nested under the agent key
