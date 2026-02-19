@@ -1,5 +1,22 @@
 # @stoneforge/smithy-server
 
+## 1.8.0
+
+### Minor Changes
+
+- bfab537: Add PATCH /api/tasks/bulk endpoint for bulk updating task fields (status, priority, complexity, taskType, assignee, owner, deadline, scheduledFor, tags)
+
+### Patch Changes
+
+- Updated dependencies [0b521cd]
+- Updated dependencies [0b521cd]
+- Updated dependencies [0b521cd]
+  - @stoneforge/quarry@1.8.0
+  - @stoneforge/shared-routes@1.8.0
+  - @stoneforge/smithy@1.8.0
+  - @stoneforge/core@1.8.0
+  - @stoneforge/storage@1.8.0
+
 ## 1.7.0
 
 ### Patch Changes

@@ -1,5 +1,17 @@
 # @stoneforge/smithy
 
+## 1.8.0
+
+### Patch Changes
+
+- 0b521cd: Replace inline bulk task delete route with shared createTaskRoutes factory from @stoneforge/shared-routes.
+- Updated dependencies [0b521cd]
+- Updated dependencies [0b521cd]
+  - @stoneforge/quarry@1.8.0
+  - @stoneforge/shared-routes@1.8.0
+  - @stoneforge/core@1.8.0
+  - @stoneforge/storage@1.8.0
+
 ## 1.7.0
 
 ### Patch Changes
