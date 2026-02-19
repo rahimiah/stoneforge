@@ -638,6 +638,7 @@ interface VirtualizedKanbanColumnProps {
   color: string;
   icon: React.ReactNode;
   tasks: Task[];
+  totalCount: number;
   entities: Entity[];
   selectedTaskId: string | null;
   onTaskClick: (taskId: string) => void;
@@ -656,6 +657,7 @@ function VirtualizedKanbanColumn({
   color,
   icon,
   tasks,
+  totalCount,
   entities,
   selectedTaskId,
   onTaskClick,
@@ -671,8 +673,6 @@ function VirtualizedKanbanColumn({
   const taskIds = tasks.map(t => t.id);
   const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRestoreId = `kanban-column-${columnId}`;
-
-  const hasActiveFilters = preferences.filters.assignee || preferences.filters.priority !== null || preferences.filters.tag;
 
   // Make the column a droppable zone for @dnd-kit
   const { setNodeRef: setDroppableRef, isOver } = useDroppable({
@@ -758,7 +758,7 @@ function VirtualizedKanbanColumn({
           className="px-2 py-0.5 text-xs bg-gray-200 dark:bg-neutral-700 text-gray-600 dark:text-gray-300 rounded-full"
           data-testid={`kanban-column-${columnId}-count`}
         >
-          {tasks.length}
+          {tasks.length < totalCount ? `${tasks.length}/${totalCount}` : totalCount}
         </span>
         <div className="ml-auto flex items-center gap-2">
           <FilterSortDropdown
@@ -788,7 +788,7 @@ function VirtualizedKanbanColumn({
         )}
         {!isLoading && tasks.length === 0 && (
           <div className="p-4 text-center text-gray-400 dark:text-gray-500 text-sm h-32 flex items-center justify-center">
-            {hasActiveFilters ? 'No matching tasks' : 'No tasks'}
+            {totalCount > 0 ? 'No matching tasks' : 'No tasks'}
           </div>
         )}
         {!isLoading && tasks.length > 0 && (
@@ -903,6 +903,26 @@ export function KanbanBoard({ entities, selectedTaskId, onTaskClick, searchQuery
     return groups;
   }, [allTasks]);
 
+  // Compute unfiltered counts per column (respects search query but not per-column filters)
+  const totalCounts = useMemo(() => {
+    const countForColumn = (columnTasks: Task[]) => {
+      if (!searchQuery) return columnTasks.length;
+      const lowerQuery = searchQuery.toLowerCase();
+      return columnTasks.filter((t) =>
+        t.title.toLowerCase().includes(lowerQuery) ||
+        t.id.toLowerCase().includes(lowerQuery)
+      ).length;
+    };
+    return {
+      backlog: countForColumn(tasksByStatus.backlog),
+      open: countForColumn(tasksByStatus.open),
+      in_progress: countForColumn(tasksByStatus.in_progress),
+      blocked: countForColumn(tasksByStatus.blocked),
+      review: countForColumn(tasksByStatus.review),
+      closed: countForColumn(tasksByStatus.closed),
+    };
+  }, [tasksByStatus, searchQuery]);
+
   // Apply filters and sorting to each column
   // Use primitive values in dependencies to ensure proper memoization
   const filteredBacklogTasks = useMemo(
@@ -1009,12 +1029,12 @@ export function KanbanBoard({ entities, selectedTaskId, onTaskClick, searchQuery
   const isDragActive = activeTask !== null;
 
   const columnPrefsMap = {
-    backlog: { prefs: backlogPrefs, setPrefs: setBacklogPrefs, tasks: filteredBacklogTasks },
-    open: { prefs: openPrefs, setPrefs: setOpenPrefs, tasks: filteredOpenTasks },
-    'in-progress': { prefs: inProgressPrefs, setPrefs: setInProgressPrefs, tasks: filteredInProgressTasks },
-    blocked: { prefs: blockedPrefs, setPrefs: setBlockedPrefs, tasks: filteredBlockedTasks },
-    review: { prefs: reviewPrefs, setPrefs: setReviewPrefs, tasks: filteredReviewTasks },
-    closed: { prefs: closedPrefs, setPrefs: setClosedPrefs, tasks: filteredClosedTasks },
+    backlog: { prefs: backlogPrefs, setPrefs: setBacklogPrefs, tasks: filteredBacklogTasks, totalCount: totalCounts.backlog },
+    open: { prefs: openPrefs, setPrefs: setOpenPrefs, tasks: filteredOpenTasks, totalCount: totalCounts.open },
+    'in-progress': { prefs: inProgressPrefs, setPrefs: setInProgressPrefs, tasks: filteredInProgressTasks, totalCount: totalCounts.in_progress },
+    blocked: { prefs: blockedPrefs, setPrefs: setBlockedPrefs, tasks: filteredBlockedTasks, totalCount: totalCounts.blocked },
+    review: { prefs: reviewPrefs, setPrefs: setReviewPrefs, tasks: filteredReviewTasks, totalCount: totalCounts.review },
+    closed: { prefs: closedPrefs, setPrefs: setClosedPrefs, tasks: filteredClosedTasks, totalCount: totalCounts.closed },
   };
 
   return (
@@ -1030,7 +1050,7 @@ export function KanbanBoard({ entities, selectedTaskId, onTaskClick, searchQuery
       >
         {COLUMNS.map((column) => {
           const Icon = column.icon;
-          const { prefs, setPrefs, tasks } = columnPrefsMap[column.id as keyof typeof columnPrefsMap];
+          const { prefs, setPrefs, tasks, totalCount } = columnPrefsMap[column.id as keyof typeof columnPrefsMap];
 
           return (
             <VirtualizedKanbanColumn
@@ -1040,6 +1060,7 @@ export function KanbanBoard({ entities, selectedTaskId, onTaskClick, searchQuery
               color={column.color}
               icon={<Icon className={`w-4 h-4 ${column.iconColor}`} />}
               tasks={tasks}
+              totalCount={totalCount}
               entities={entities}
               selectedTaskId={selectedTaskId}
               onTaskClick={onTaskClick}

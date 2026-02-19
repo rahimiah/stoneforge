@@ -123,8 +123,9 @@ test.describe('TB132: Kanban Column Virtualization with Infinite Scroll', () => 
     // Should show a valid count (0 or more)
     expect(count).toBeGreaterThanOrEqual(0);
 
-    // Count badge should not contain "/" or "of" (no pagination indicator)
-    expect(countText).not.toContain('/');
+    // Count badge should show plain number or filtered/total format (e.g. "2/5")
+    // when per-column localStorage filters reduce visible cards
+    expect(countText).toMatch(/^\d+(\/\d+)?$/);
     expect(countText?.toLowerCase()).not.toContain('of');
   });
 
