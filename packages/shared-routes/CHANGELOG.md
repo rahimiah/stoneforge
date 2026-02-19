@@ -1,5 +1,16 @@
 # @stoneforge/shared-routes
 
+## 1.8.0
+
+### Minor Changes
+
+- 0b521cd: Add createTaskRoutes factory with PATCH /api/tasks/bulk and POST /api/tasks/bulk-delete endpoints, consolidating previously duplicated routes from quarry and smithy servers.
+
+### Patch Changes
+
+- @stoneforge/core@1.8.0
+- @stoneforge/storage@1.8.0
+
 ## 1.7.0
 
 ### Patch Changes
