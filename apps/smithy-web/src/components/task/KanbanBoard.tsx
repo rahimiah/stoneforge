@@ -628,6 +628,7 @@ interface VirtualizedKanbanColumnProps {
   color: string;
   icon: React.ReactNode;
   tasks: Task[];
+  totalCount: number;
   entityNameMap: Map<string, string>;
   selectedTaskId: string | null;
   onTaskClick: (taskId: string) => void;
@@ -645,6 +646,7 @@ function VirtualizedKanbanColumn({
   color,
   icon,
   tasks,
+  totalCount,
   entityNameMap,
   selectedTaskId,
   onTaskClick,
@@ -659,8 +661,6 @@ function VirtualizedKanbanColumn({
   const taskIds = tasks.map(t => t.id);
   const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRestoreId = `kanban-column-${columnId}`;
-
-  const hasActiveFilters = preferences.filters.assignee || preferences.filters.priority !== null || preferences.filters.tag;
 
   const { setNodeRef: setDroppableRef, isOver } = useDroppable({
     id: columnId,
@@ -738,7 +738,7 @@ function VirtualizedKanbanColumn({
           className="px-2 py-0.5 text-xs bg-[var(--color-surface)] text-[var(--color-text-secondary)] rounded-full"
           data-testid={`kanban-column-${columnId}-count`}
         >
-          {tasks.length}
+          {tasks.length < totalCount ? `${tasks.length}/${totalCount}` : totalCount}
         </span>
         <div className="ml-auto flex items-center gap-2">
           <FilterSortDropdown
@@ -764,7 +764,7 @@ function VirtualizedKanbanColumn({
       >
         {tasks.length === 0 ? (
           <div className="p-4 text-center text-[var(--color-text-tertiary)] text-sm h-32 flex items-center justify-center">
-            {hasActiveFilters ? 'No matching tasks' : 'No tasks'}
+            {totalCount > 0 ? 'No matching tasks' : 'No tasks'}
           </div>
         ) : (
           <div
@@ -886,6 +886,26 @@ export function KanbanBoard({
     return groups;
   }, [tasks]);
 
+  // Compute unfiltered counts per column (respects search query but not per-column filters)
+  const totalCounts = useMemo(() => {
+    const countForColumn = (columnTasks: Task[]) => {
+      if (!searchQuery) return columnTasks.length;
+      const lowerQuery = searchQuery.toLowerCase();
+      return columnTasks.filter((t) =>
+        t.title.toLowerCase().includes(lowerQuery) ||
+        t.id.toLowerCase().includes(lowerQuery)
+      ).length;
+    };
+    return {
+      backlog: countForColumn(tasksByColumn.backlog),
+      unassigned: countForColumn(tasksByColumn.unassigned),
+      assigned: countForColumn(tasksByColumn.assigned),
+      in_progress: countForColumn(tasksByColumn.in_progress),
+      closed: countForColumn(tasksByColumn.closed),
+      awaiting_merge: countForColumn(tasksByColumn.awaiting_merge),
+    };
+  }, [tasksByColumn, searchQuery]);
+
   // Apply filters and sorting to each column
   const filteredBacklog = useMemo(
     () => applyFiltersAndSort(tasksByColumn.backlog, backlogPrefs.filters, backlogPrefs.sortOverride || normalizedPageSort, searchQuery),
@@ -999,12 +1019,12 @@ export function KanbanBoard({
   const isDragActive = activeTask !== null;
 
   const columnData = [
-    { id: 'backlog', prefs: backlogPrefs, setPrefs: setBacklogPrefs, tasks: filteredBacklog },
-    { id: 'unassigned', prefs: unassignedPrefs, setPrefs: setUnassignedPrefs, tasks: filteredUnassigned },
-    { id: 'assigned', prefs: assignedPrefs, setPrefs: setAssignedPrefs, tasks: filteredAssigned },
-    { id: 'in_progress', prefs: inProgressPrefs, setPrefs: setInProgressPrefs, tasks: filteredInProgress },
-    { id: 'awaiting_merge', prefs: awaitingMergePrefs, setPrefs: setAwaitingMergePrefs, tasks: filteredAwaitingMerge },
-    { id: 'closed', prefs: closedPrefs, setPrefs: setClosedPrefs, tasks: filteredClosed },
+    { id: 'backlog', prefs: backlogPrefs, setPrefs: setBacklogPrefs, tasks: filteredBacklog, totalCount: totalCounts.backlog },
+    { id: 'unassigned', prefs: unassignedPrefs, setPrefs: setUnassignedPrefs, tasks: filteredUnassigned, totalCount: totalCounts.unassigned },
+    { id: 'assigned', prefs: assignedPrefs, setPrefs: setAssignedPrefs, tasks: filteredAssigned, totalCount: totalCounts.assigned },
+    { id: 'in_progress', prefs: inProgressPrefs, setPrefs: setInProgressPrefs, tasks: filteredInProgress, totalCount: totalCounts.in_progress },
+    { id: 'awaiting_merge', prefs: awaitingMergePrefs, setPrefs: setAwaitingMergePrefs, tasks: filteredAwaitingMerge, totalCount: totalCounts.awaiting_merge },
+    { id: 'closed', prefs: closedPrefs, setPrefs: setClosedPrefs, tasks: filteredClosed, totalCount: totalCounts.closed },
   ];
 
   return (
@@ -1020,7 +1040,7 @@ export function KanbanBoard({
       >
         {COLUMNS.map((column, index) => {
           const Icon = column.icon;
-          const { prefs, setPrefs, tasks: columnTasks } = columnData[index];
+          const { prefs, setPrefs, tasks: columnTasks, totalCount } = columnData[index];
 
           return (
             <VirtualizedKanbanColumn
@@ -1030,6 +1050,7 @@ export function KanbanBoard({
               color={column.color}
               icon={<Icon className={`w-4 h-4 ${column.iconColor}`} />}
               tasks={columnTasks}
+              totalCount={totalCount}
               entityNameMap={entityNameMap}
               selectedTaskId={selectedTaskId}
               onTaskClick={onTaskClick}
