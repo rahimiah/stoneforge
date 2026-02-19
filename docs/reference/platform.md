@@ -311,7 +311,7 @@ const handleEvent = useInPlaceCacheUpdates();
 
 **UI Primitive:**
 ```typescript
-// apps/quarry-web/src/components/ui/Button.tsx
+// packages/ui/src/components/Button.tsx (re-exported by apps via @stoneforge/ui)
 interface ButtonProps {
   variant?: 'primary' | 'secondary';
   children: React.ReactNode;

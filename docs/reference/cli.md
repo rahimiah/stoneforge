@@ -1395,6 +1395,41 @@ sf library delete el-lib123
 sf library delete el-lib123 --force
 ```
 
+## Docs Commands
+
+Convenience shortcuts for documentation infrastructure.
+
+| Command                           | Description                                           |
+| --------------------------------- | ----------------------------------------------------- |
+| `sf docs init`                    | Bootstrap Documentation library and directory         |
+| `sf docs add <doc-id> [doc-id2]`  | Add document(s) to the Documentation library          |
+
+#### docs init
+
+Idempotently finds or creates the Documentation library and a Documentation Directory document (reference category). Running multiple times produces the same result without duplicates.
+
+```bash
+sf docs init
+sf docs init --json
+sf docs init --quiet
+```
+
+#### docs add
+
+Add one or more documents to the Documentation library. The library must exist (run `sf docs init` first).
+
+| Argument | Description |
+|----------|-------------|
+| `<doc-id>` | One or more document identifiers to add |
+
+```bash
+sf docs add el-doc123
+sf docs add el-doc123 el-doc456 el-doc789
+sf docs add el-doc123 --json
+```
+
+---
+
 ## Playbook Commands
 
 | Command                             | Description                                    |

@@ -75,11 +75,11 @@ sf task create --title "Build API"   # Create a task
 sf task list                         # List tasks with filtering
 sf task ready                        # Show unblocked tasks
 sf task blocked                      # Show blocked tasks with reasons
-sf dependency add el-a blocks el-b   # Add a dependency
+sf dependency add el-a el-b --type blocks  # Add a dependency
 sf dependency tree el-a              # Visualize dependency tree
 sf export                            # Export to JSONL for Git sync
 sf import                            # Import from JSONL
-sf search "auth flow"                # Full-text search
+sf document search "auth flow"       # Full-text search
 sf stats                             # Workspace statistics
 sf plan list                         # Manage plans
 sf workflow list                     # Manage workflows
