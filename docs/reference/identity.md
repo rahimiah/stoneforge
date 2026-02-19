@@ -314,13 +314,13 @@ sf identity whoami
 sf identity keygen
 
 # Sign data
-sf identity sign "data to sign"
+sf identity sign --data "data to sign" --sign-key <key> --actor alice
 
 # Verify signature
-sf identity verify <signature> "data"
+sf identity verify --signature <sig> --public-key <key> --signed-at <time> --data "data" --actor alice
 
 # Compute hash
-sf identity hash "data"
+sf identity hash --data "data"
 
 # Show/set mode
 sf identity mode

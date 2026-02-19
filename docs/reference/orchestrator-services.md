@@ -279,7 +279,8 @@ const daemon = createDispatchDaemon(
   {
     pollIntervalMs: 5000,
   },
-  poolService  // optional
+  poolService,      // optional
+  settingsService   // optional
 );
 ```
 

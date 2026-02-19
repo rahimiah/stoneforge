@@ -340,6 +340,11 @@ sf alias
 | `dep`              | `dependency` |
 | `msg`              | `message`    |
 | `doc`              | `document`   |
+
+**Plugin aliases** (available when the orchestrator plugin is loaded):
+
+| Alias              | Maps to      |
+| ------------------ | ------------ |
 | `agents`           | `agent list` |
 | `pools`            | `pool list`  |
 
@@ -615,12 +620,12 @@ Add a dependency between two elements.
 
 | Option                 | Description                                           |
 | ---------------------- | ----------------------------------------------------- |
-| `-t, --type <type>`    | Dependency type (required): blocks, requires, relates |
+| `-t, --type <type>`    | Dependency type (required): blocks, parent-child, awaits, relates-to, references, supersedes, duplicates, caused-by, validates, mentions, authored-by, assigned-to, approved-by, replies-to |
 | `-m, --metadata <json>` | JSON metadata to attach to the dependency            |
 
 ```bash
 sf dependency add --type=blocks A B
-sf dependency add --type=requires A B --metadata '{"reason": "data dependency"}'
+sf dependency add --type=relates-to A B --metadata '{"reason": "data dependency"}'
 ```
 
 **Semantics:** `sf dependency add --type=blocks A B` means A (blocked) is blocked BY B (blocker).
@@ -1251,6 +1256,7 @@ List messages in a channel.
 | ---------------------- | ---------------------------------------- |
 | `-c, --channel <id>`   | Channel ID (required)                    |
 | `-s, --sender <id>`    | Filter by sender                         |
+| `-r, --rootOnly`       | Show only root messages (no replies)     |
 | `-l, --limit <n>`      | Maximum results                          |
 
 ```bash

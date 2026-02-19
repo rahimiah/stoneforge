@@ -15,7 +15,7 @@ const spawner = createSpawnerService({
   provider: 'claude-code',        // Agent provider (preferred)
   claudePath: 'claude',           // @deprecated - use provider instead
   workingDirectory: '/workspace', // Default working directory
-  timeout: 30000,                 // Timeout for init (30s)
+  timeout: 120000,                // Timeout for init (2 minutes)
   stoneforgeRoot: '/workspace',    // Sets STONEFORGE_ROOT env var
   environmentVariables: {},       // Additional env vars
 });
