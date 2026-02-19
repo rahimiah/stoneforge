@@ -281,6 +281,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<neve
   const { libraryCommand } = await import('./commands/library.js');
   const { teamCommand } = await import('./commands/team.js');
   const { documentCommand } = await import('./commands/document.js');
+  const { docsCommand } = await import('./commands/docs.js');
   const { embeddingsCommand } = await import('./commands/embeddings.js');
   const { messageCommand } = await import('./commands/message.js');
   const { inboxCommand } = await import('./commands/inbox.js');
@@ -344,6 +345,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<neve
   registerCommand(libraryCommand);
   registerCommand(teamCommand);
   registerCommand(documentCommand);
+  registerCommand(docsCommand);
   registerCommand(embeddingsCommand);
   registerCommand(messageCommand);
   registerCommand(inboxCommand);
