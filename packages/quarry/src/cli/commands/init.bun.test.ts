@@ -150,7 +150,7 @@ describe('initCommand', () => {
       const configPath = join(testDir, '.stoneforge', 'config.yaml');
       const content = readFileSync(configPath, 'utf-8');
       expect(content).toContain('sync:');
-      expect(content).toContain('auto_export: false');
+      expect(content).toContain('auto_export: true');
       expect(content).toContain('elements_file: elements.jsonl');
       expect(content).toContain('dependencies_file: dependencies.jsonl');
     });
