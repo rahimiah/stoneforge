@@ -614,12 +614,12 @@ Options:
   -c, --channel <id>   Channel to list messages from (required)
   -s, --sender <id>    Filter by sender entity
   -l, --limit <n>      Maximum messages to show
-  -r, --rootOnly       Show only root messages (no replies)
+  -r, --root-only      Show only root messages (no replies)
 
 Examples:
   sf message list --channel el-abc123
   sf message list -c el-abc123 --sender el-user456
-  sf message list -c el-abc123 --rootOnly --limit 20`,
+  sf message list -c el-abc123 --root-only --limit 20`,
   options: msgListOptions,
   handler: msgListHandler as Command['handler'],
 };

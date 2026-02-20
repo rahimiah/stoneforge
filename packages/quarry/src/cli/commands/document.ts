@@ -831,11 +831,11 @@ Arguments:
   document-id   Document identifier
 
 Options:
-  -V, --docVersion <n>  Show specific version
+  -V, --doc-version <n>  Show specific version
 
 Examples:
   sf document show el-doc123
-  sf document show el-doc123 --docVersion 2
+  sf document show el-doc123 --doc-version 2
   sf document show el-doc123 --quiet  # Output content only`,
   options: docShowOptions,
   handler: docShowHandler as Command['handler'],

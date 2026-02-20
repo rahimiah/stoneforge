@@ -9,6 +9,7 @@ import {
   getGlobalOptionsHelp,
   getCommandOptionsHelp,
   unescapeShellArtifacts,
+  camelToKebab,
 } from './parser.js';
 import type { CommandOption } from './types.js';
 
@@ -278,6 +279,49 @@ describe('parseArgs', () => {
     });
   });
 
+  describe('kebab-case option support', () => {
+    const camelCaseOptions: CommandOption[] = [
+      { name: 'replyTo', short: 'r', description: 'Reply to message', hasValue: true },
+      { name: 'rootOnly', description: 'Root only', hasValue: false },
+      { name: 'docVersion', short: 'V', description: 'Document version', hasValue: true },
+    ];
+
+    it('should accept kebab-case form of camelCase options', () => {
+      const result = parseArgs(['send', '--reply-to', 'el-msg123'], camelCaseOptions);
+      expect(result.commandOptions.replyTo).toBe('el-msg123');
+    });
+
+    it('should still accept camelCase form for backward compatibility', () => {
+      const result = parseArgs(['send', '--replyTo', 'el-msg123'], camelCaseOptions);
+      expect(result.commandOptions.replyTo).toBe('el-msg123');
+    });
+
+    it('should accept kebab-case boolean options', () => {
+      const result = parseArgs(['list', '--root-only'], camelCaseOptions);
+      expect(result.commandOptions.rootOnly).toBe(true);
+    });
+
+    it('should accept kebab-case --option=value syntax', () => {
+      const result = parseArgs(['show', '--doc-version=2'], camelCaseOptions);
+      expect(result.commandOptions.docVersion).toBe('2');
+    });
+
+    it('should map kebab-case to the same camelCase key', () => {
+      const result1 = parseArgs(['send', '--reply-to', 'el-msg123'], camelCaseOptions);
+      const result2 = parseArgs(['send', '--replyTo', 'el-msg123'], camelCaseOptions);
+      expect(result1.commandOptions).toEqual(result2.commandOptions);
+    });
+
+    it('should not create kebab-case alias for already-kebab options', () => {
+      const simpleOptions: CommandOption[] = [
+        { name: 'channel', short: 'c', description: 'Channel', hasValue: true },
+      ];
+      // 'channel' has no uppercase, so no kebab alias is created, just works normally
+      const result = parseArgs(['send', '--channel', 'el-ch1'], simpleOptions);
+      expect(result.commandOptions.channel).toBe('el-ch1');
+    });
+  });
+
   describe('error handling', () => {
     it('should throw on unknown option', () => {
       expect(() => parseArgs(['--unknown'])).toThrow('Unknown option: --unknown');
@@ -368,6 +412,44 @@ describe('getCommandOptionsHelp', () => {
     expect(help).toContain('(required)');
     expect(help).toContain('--force');
     expect(help).toContain('-f');
+  });
+
+  it('should display camelCase options in kebab-case', () => {
+    const options: CommandOption[] = [
+      { name: 'replyTo', short: 'r', description: 'Reply to message', hasValue: true },
+      { name: 'rootOnly', description: 'Root only' },
+    ];
+    const help = getCommandOptionsHelp(options);
+    expect(help).toContain('--reply-to');
+    expect(help).toContain('--root-only');
+    expect(help).not.toContain('--replyTo');
+    expect(help).not.toContain('--rootOnly');
+  });
+});
+
+describe('camelToKebab', () => {
+  it('should convert camelCase to kebab-case', () => {
+    expect(camelToKebab('replyTo')).toBe('reply-to');
+  });
+
+  it('should convert multiple uppercase letters', () => {
+    expect(camelToKebab('signKeyFile')).toBe('sign-key-file');
+  });
+
+  it('should leave already-lowercase strings unchanged', () => {
+    expect(camelToKebab('channel')).toBe('channel');
+  });
+
+  it('should handle single character option names', () => {
+    expect(camelToKebab('r')).toBe('r');
+  });
+
+  it('should convert rootOnly', () => {
+    expect(camelToKebab('rootOnly')).toBe('root-only');
+  });
+
+  it('should convert docVersion', () => {
+    expect(camelToKebab('docVersion')).toBe('doc-version');
   });
 });
 

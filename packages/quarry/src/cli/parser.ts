@@ -8,6 +8,24 @@ import type { GlobalOptions, ParsedCommandLine, CommandOption } from './types.js
 import { DEFAULT_GLOBAL_OPTIONS } from './types.js';
 
 // ============================================================================
+// Case Conversion Utilities
+// ============================================================================
+
+/**
+ * Converts a camelCase string to kebab-case.
+ *
+ * CLI conventions use kebab-case for long options (e.g., --reply-to),
+ * but option definitions use camelCase for JavaScript property names (e.g., replyTo).
+ * This function bridges the two.
+ *
+ * @param str - camelCase string
+ * @returns kebab-case string
+ */
+export function camelToKebab(str: string): string {
+  return str.replace(/[A-Z]/g, (match) => `-${match.toLowerCase()}`);
+}
+
+// ============================================================================
 // Shell Escape Handling
 // ============================================================================
 
@@ -85,9 +103,16 @@ export function parseArgs(
   // Build command option lookup
   const cmdOptDefs: Record<string, { hasValue?: boolean; key: string; array?: boolean }> = {};
   for (const opt of commandOptions) {
-    cmdOptDefs[`--${opt.name}`] = { hasValue: opt.hasValue, key: opt.name, array: opt.array };
+    const def = { hasValue: opt.hasValue, key: opt.name, array: opt.array };
+    cmdOptDefs[`--${opt.name}`] = def;
+    // Also register kebab-case alias for camelCase option names (e.g., replyTo -> reply-to)
+    // This follows CLI conventions where long options use kebab-case (--reply-to)
+    const kebabName = camelToKebab(opt.name);
+    if (kebabName !== opt.name) {
+      cmdOptDefs[`--${kebabName}`] = def;
+    }
     if (opt.short) {
-      cmdOptDefs[`-${opt.short}`] = { hasValue: opt.hasValue, key: opt.name, array: opt.array };
+      cmdOptDefs[`-${opt.short}`] = def;
     }
     // Set defaults
     if (opt.defaultValue !== undefined) {
@@ -237,7 +262,7 @@ export function validateRequiredOptions(
 ): void {
   for (const opt of definitions) {
     if (opt.required && commandOptions[opt.name] === undefined) {
-      throw new Error(`Required option --${opt.name} is missing`);
+      throw new Error(`Required option --${camelToKebab(opt.name)} is missing`);
     }
   }
 }
@@ -272,9 +297,10 @@ export function getCommandOptionsHelp(options: CommandOption[]): string {
   const lines = ['Command Options:'];
   for (const opt of options) {
     const shortPart = opt.short ? `-${opt.short}, ` : '    ';
-    const valuePart = opt.hasValue ? ` <${opt.name}>` : '';
+    const displayName = camelToKebab(opt.name);
+    const valuePart = opt.hasValue ? ` <${displayName}>` : '';
     const requiredPart = opt.required ? ' (required)' : '';
-    lines.push(`  ${shortPart}--${opt.name}${valuePart}${requiredPart}`);
+    lines.push(`  ${shortPart}--${displayName}${valuePart}${requiredPart}`);
     lines.push(`        ${opt.description}`);
   }
   return lines.join('\n');

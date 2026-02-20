@@ -602,7 +602,7 @@ describe('msg send command options', () => {
     expect(toOption!.hasValue).toBe(true);
   });
 
-  test('has --replyTo option', () => {
+  test('has --reply-to option', () => {
     const replyToOption = messageCommand.subcommands!.send.options?.find((o) => o.name === 'replyTo');
     expect(replyToOption).toBeDefined();
     expect(replyToOption!.short).toBe('r');
@@ -707,7 +707,7 @@ describe('msg list command options', () => {
     expect(limitOption!.short).toBe('l');
   });
 
-  test('has --rootOnly option', () => {
+  test('has --root-only option', () => {
     const rootOnlyOption = messageCommand.subcommands!.list.options?.find((o) => o.name === 'rootOnly');
     expect(rootOnlyOption).toBeDefined();
     expect(rootOnlyOption!.short).toBe('r');
