@@ -80,7 +80,7 @@ export const STATUS_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   ],
   [TaskStatus.DEFERRED]: [TaskStatus.OPEN, TaskStatus.IN_PROGRESS, TaskStatus.BACKLOG],
   [TaskStatus.BACKLOG]: [TaskStatus.OPEN, TaskStatus.DEFERRED, TaskStatus.CLOSED],
-  [TaskStatus.REVIEW]: [TaskStatus.CLOSED, TaskStatus.IN_PROGRESS], // Merge completes or reopen for fixes
+  [TaskStatus.REVIEW]: [TaskStatus.CLOSED, TaskStatus.IN_PROGRESS, TaskStatus.OPEN], // Merge completes, reopen for fixes, or reset to pool
   [TaskStatus.CLOSED]: [TaskStatus.OPEN], // Reopen
   [TaskStatus.TOMBSTONE]: [], // Terminal state
 };
