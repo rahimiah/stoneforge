@@ -12,14 +12,15 @@ Manages Claude Code process spawning and lifecycle.
 import { createSpawnerService } from '@stoneforge/smithy';
 
 const spawner = createSpawnerService({
-  provider: 'claude-code',        // Agent provider (preferred)
-  claudePath: 'claude',           // @deprecated - use provider instead
+  provider: myAgentProvider,      // AgentProvider instance (optional, defaults to ClaudeAgentProvider)
   workingDirectory: '/workspace', // Default working directory
   timeout: 120000,                // Timeout for init (2 minutes)
   stoneforgeRoot: '/workspace',    // Sets STONEFORGE_ROOT env var
   environmentVariables: {},       // Additional env vars
 });
 ```
+
+> **Note:** The `provider` field accepts an `AgentProvider` object (not a string). If omitted, defaults to the built-in `ClaudeAgentProvider`. The `claudePath` option is deprecated — use `provider` instead.
 
 ### Spawn Modes
 

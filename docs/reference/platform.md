@@ -312,15 +312,18 @@ const handleEvent = useInPlaceCacheUpdates();
 **UI Primitive:**
 ```typescript
 // packages/ui/src/components/Button.tsx (re-exported by apps via @stoneforge/ui)
-interface ButtonProps {
-  variant?: 'primary' | 'secondary';
-  children: React.ReactNode;
-  onClick?: () => void;
+interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'outline';
+  size?: 'xs' | 'sm' | 'md' | 'lg';
+  isLoading?: boolean;
+  leftIcon?: React.ReactNode;
+  rightIcon?: React.ReactNode;
+  fullWidth?: boolean;
 }
 
-export function Button({ variant = 'primary', children, onClick }: ButtonProps) {
+export function Button({ variant = 'primary', size = 'md', children, ...props }: ButtonProps) {
   return (
-    <button className={cn('px-4 py-2 rounded', variants[variant])} onClick={onClick}>
+    <button className={cn('rounded', variantStyles[variant], sizeStyles[size])} {...props}>
       {children}
     </button>
   );
