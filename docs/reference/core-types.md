@@ -71,7 +71,7 @@ type Complexity = 1 | 2 | 3 | 4 | 5;
 - `blocked` → `open`, `in_progress`, `deferred`, `closed` (can also be set via direct transition or computed automatically from dependencies)
 - `deferred` → `open`, `in_progress`, `backlog`
 - `backlog` → `open`, `deferred`, `closed`
-- `review` → `closed`, `in_progress` (merge completes or reopen for fixes)
+- `review` → `closed`, `in_progress`, `open` (merge completes, reopen for fixes, or reset to pool)
 - `closed` → only `open` (cannot go to in_progress, blocked, or deferred)
 - `tombstone` is terminal
 

@@ -973,7 +973,7 @@ interface PoolAgentTypeConfig {
   stewardFocus?: 'merge' | 'docs' | 'recovery' | 'custom';  // For stewards
   priority?: number;                 // Spawn priority (higher = higher priority)
   maxSlots?: number;                 // Max slots for this type within the pool
-  provider?: string;                 // Agent provider (e.g., 'claude', 'opencode')
+  provider?: string;                 // Agent provider (e.g., 'claude-code', 'opencode')
   model?: string;                    // Model identifier (e.g., 'claude-sonnet-4-20250514')
 }
 ```

@@ -30,6 +30,7 @@ Configuration precedence (highest to lowest):
 ```typescript
 interface Configuration {
   actor?: string;                    // Default actor for operations
+  baseBranch?: string;               // Base branch for merge targets (default: auto-detect)
   database: string;                  // Database path (default: 'stoneforge.db')
   sync: {
     autoExport: boolean;             // Auto-export on mutation (default: true)
@@ -111,6 +112,7 @@ const source = getValueSource('sync.autoExport');
 ```typescript
 type ConfigPath =
   | 'actor'
+  | 'baseBranch'
   | 'database'
   | 'sync.autoExport'
   | 'sync.exportDebounce'
@@ -166,6 +168,7 @@ const discovery = discoverConfigFile('/project');
 | Variable | Config Path | Example |
 |----------|-------------|---------|
 | `STONEFORGE_ACTOR` | `actor` | `agent-1` |
+| `STONEFORGE_BASE_BRANCH` | `baseBranch` | `main` |
 | `STONEFORGE_DB` | `database` | `stoneforge.db` |
 | `STONEFORGE_SYNC_AUTO_EXPORT` | `sync.autoExport` | `true` |
 | `STONEFORGE_IDENTITY_MODE` | `identity.mode` | `cryptographic` |
@@ -189,6 +192,8 @@ const path = getEnvConfigPath();
 
 ```yaml
 actor: default-agent
+
+base_branch: master  # optional, auto-detected from git if omitted
 
 database: stoneforge.db
 
