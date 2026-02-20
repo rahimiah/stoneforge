@@ -1,6 +1,6 @@
 # How to Add a React Component
 
-Step-by-step guide for adding React components to the web apps.
+Step-by-step guide for adding React components to the web apps. See [../reference/web-ui.md](../reference/web-ui.md) for screenshots of the existing UI.
 
 ## Prerequisites
 

@@ -1,6 +1,6 @@
 # Platform Reference
 
-Platform applications: servers and web UIs.
+Platform applications: servers and web UIs. See [web-ui.md](web-ui.md) for screenshots of all UI pages and actions.
 
 ## Apps Overview
 
@@ -189,6 +189,8 @@ The underlying `@stoneforge/ui` hook handles WebSocket connection, reconnection,
 
 React + Vite SPA.
 
+![Quarry Web Dashboard](../images/quarry-web/dashboard.png)
+
 ### Running
 
 ```bash
@@ -207,6 +209,22 @@ bun run build  # Production build
 | `src/api/hooks/` | Data fetching hooks |
 | `src/components/` | UI components |
 | `src/routes/` | Page components |
+
+#### Task Management
+
+Tasks can be viewed in list or kanban format:
+
+![Quarry Tasks List](../images/quarry-web/tasks-list.png)
+
+![Quarry Tasks Kanban](../images/quarry-web/tasks-kanban.png)
+
+Create tasks via the Create Task dialog:
+
+![Create Task Dialog](../images/quarry-web/task-create.png)
+
+Click a task row to view its details:
+
+![Task Detail](../images/quarry-web/task-detail.png)
 
 ### Adding a Page
 
@@ -471,6 +489,8 @@ app.route('/', createMyFeatureRoutes(services));
 
 **Entry:** `src/main.tsx`
 
+![Smithy Web Activity Feed](../images/smithy-web/activity-feed.png)
+
 ### Key Components
 
 | Component | Purpose |
@@ -499,7 +519,39 @@ app.route('/', createMyFeatureRoutes(services));
 | `/documents` | `DocumentsPage` | Document library |
 | `/editor` | `FileEditorPage` | Read-only file editor with Monaco, multi-tab support, VSCode-style activity bar with file tree and search panel |
 
+#### Task Management
+
+The Tasks page supports both list and kanban views:
+
+![Tasks List View](../images/smithy-web/tasks-list-view.png)
+
+![Tasks Kanban View](../images/smithy-web/tasks-kanban-view.png)
+
+Create new tasks via the Create Task dialog:
+
+![Create Task Dialog](../images/smithy-web/tasks-create-dialog.png)
+
+#### Agent Management
+
+The Agents page shows all registered agents (Director, Workers, Stewards) with their status and configuration:
+
+![Agents List](../images/smithy-web/agents-list.png)
+
+Create new agents (Workers or Stewards) via the dialog:
+
+![Create Agent Dialog](../images/smithy-web/create-agent-dialog.png)
+
+The Graph tab visualizes the agent hierarchy with an interactive ReactFlow diagram:
+
+![Agent Graph](../images/smithy-web/agents-graph.png)
+
+Stewards are managed in their own tab:
+
+![Stewards Tab](../images/smithy-web/stewards-tab.png)
+
 ### Document Library Drag-and-Drop
+
+![Documents Library](../images/smithy-web/documents-library.png)
 
 The Documents page supports drag-and-drop for organizing documents and libraries:
 
@@ -602,6 +654,8 @@ resetAllShortcuts();
 ```
 
 ### Workspace Panes
+
+![Workspaces](../images/smithy-web/workspaces.png)
 
 ```typescript
 import { usePaneManager } from '@/components/workspace/usePaneManager';

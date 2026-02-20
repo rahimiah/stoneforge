@@ -28,6 +28,7 @@
 | **Platform** |
 | Use the CLI | [reference/cli.md](reference/cli.md) | `packages/quarry/src/cli/commands/` |
 | Work with platform apps | [reference/platform.md](reference/platform.md) | `apps/quarry-server/`, `apps/quarry-web/`, etc. |
+| Browse the web UI | [reference/web-ui.md](reference/web-ui.md) | `apps/quarry-web/`, `apps/smithy-web/` |
 | **How-To Guides** |
 | Add an API endpoint | [how-to/add-api-endpoint.md](how-to/add-api-endpoint.md) | `apps/quarry-server/src/index.ts`, `apps/smithy-server/src/routes/` |
 | Add a React component | [how-to/add-react-component.md](how-to/add-react-component.md) | `apps/quarry-web/src/components/` |
