@@ -25,13 +25,13 @@ const SKILL_FILE = 'SKILL.md';
 // ============================================================================
 
 /**
- * Attempts to find the skills directory from orchestrator-sdk package
+ * Attempts to find the skills directory from the @stoneforge/smithy package
  */
 function findSkillsSourceDir(): string | null {
   // Try multiple locations to find the skills
 
-  // 1. Check if orchestrator-sdk is in node_modules
-  const nodeModulesPath = join(process.cwd(), 'node_modules', '@stoneforge', 'orchestrator-sdk');
+  // 1. Check if @stoneforge/smithy is in node_modules (dist/skills for published package)
+  const nodeModulesPath = join(process.cwd(), 'node_modules', '@stoneforge', 'smithy');
   const nodeModulesSkillsPath = join(nodeModulesPath, 'dist', 'skills');
   if (existsSync(nodeModulesSkillsPath)) {
     return nodeModulesSkillsPath;
@@ -46,17 +46,17 @@ function findSkillsSourceDir(): string | null {
   // 3. Try to find it relative to this package (for monorepo development)
   try {
     const thisFile = fileURLToPath(import.meta.url);
-    const sdkRoot = dirname(dirname(dirname(dirname(thisFile)))); // Go up from commands -> cli -> src -> sdk
-    const orchestratorSdkPath = join(dirname(sdkRoot), 'orchestrator-sdk', 'src', 'skills');
-    if (existsSync(orchestratorSdkPath)) {
-      return orchestratorSdkPath;
+    const quarryRoot = dirname(dirname(dirname(dirname(thisFile)))); // Go up from commands -> cli -> src -> quarry
+    const smithySkillsPath = join(dirname(quarryRoot), 'smithy', 'src', 'skills');
+    if (existsSync(smithySkillsPath)) {
+      return smithySkillsPath;
     }
   } catch {
     // Ignore errors when trying to resolve paths
   }
 
   // 4. Try global node_modules
-  const globalNodeModulesPath = join(dirname(process.execPath), '..', 'lib', 'node_modules', '@stoneforge', 'orchestrator-sdk', 'dist', 'skills');
+  const globalNodeModulesPath = join(dirname(process.execPath), '..', 'lib', 'node_modules', '@stoneforge', 'smithy', 'dist', 'skills');
   if (existsSync(globalNodeModulesPath)) {
     return globalNodeModulesPath;
   }
