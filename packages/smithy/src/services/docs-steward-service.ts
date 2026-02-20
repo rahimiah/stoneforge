@@ -22,6 +22,7 @@ import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { detectTargetBranch } from '../git/merge.js';
 
 const execAsync = promisify(exec);
 const readFile = promisify(fs.readFile);
@@ -831,44 +832,12 @@ export class DocsStewardServiceImpl implements DocsStewardService {
       return this.targetBranch;
     }
 
-    if (this.config.targetBranch) {
-      this.targetBranch = this.config.targetBranch;
-      return this.targetBranch;
-    }
-
-    // Auto-detect from git
-    try {
-      const { stdout } = await execAsync('git symbolic-ref refs/remotes/origin/HEAD', {
-        cwd: this.config.workspaceRoot,
-      });
-      const match = stdout.trim().match(/refs\/remotes\/origin\/(.+)/);
-      if (match) {
-        this.targetBranch = match[1];
-        return this.targetBranch;
-      }
-    } catch {
-      // Fall through to default
-    }
-
-    // Try common defaults
-    try {
-      await execAsync('git rev-parse --verify origin/main', {
-        cwd: this.config.workspaceRoot,
-      });
-      this.targetBranch = 'main';
-      return this.targetBranch;
-    } catch {
-      try {
-        await execAsync('git rev-parse --verify origin/master', {
-          cwd: this.config.workspaceRoot,
-        });
-        this.targetBranch = 'master';
-        return this.targetBranch;
-      } catch {
-        this.targetBranch = 'main';
-        return this.targetBranch;
-      }
-    }
+    // Delegate to the canonical detectTargetBranch(), passing config value
+    this.targetBranch = await detectTargetBranch(
+      this.config.workspaceRoot,
+      this.config.targetBranch
+    );
+    return this.targetBranch;
   }
 }
 

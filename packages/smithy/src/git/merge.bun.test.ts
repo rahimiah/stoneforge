@@ -128,6 +128,73 @@ describe('detectTargetBranch', () => {
       rmrf(repoDir);
     }
   });
+
+  test('returns configBaseBranch when provided', async () => {
+    const repoDir = await createTestRepo();
+    try {
+      const branch = await detectTargetBranch(repoDir, 'develop');
+      expect(branch).toBe('develop');
+    } finally {
+      rmrf(repoDir);
+    }
+  });
+
+  test('returns configBaseBranch even when remote exists', async () => {
+    const { repoDir, remoteDir } = await setup();
+    try {
+      const branch = await detectTargetBranch(repoDir, 'production');
+      expect(branch).toBe('production');
+    } finally {
+      cleanup(repoDir, remoteDir);
+    }
+  });
+
+  test('ignores empty configBaseBranch and falls back to auto-detection', async () => {
+    const repoDir = await createTestRepo();
+    try {
+      const branch = await detectTargetBranch(repoDir, '');
+      expect(branch).toBe('main');
+    } finally {
+      rmrf(repoDir);
+    }
+  });
+
+  test('detects master when only master branch exists', async () => {
+    // Create a repo with only "master" branch
+    const repoDir = path.join('/tmp', `merge-test-master-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    fs.mkdirSync(repoDir, { recursive: true });
+    await execAsync('git init -b master', { cwd: repoDir });
+    await execAsync('git config user.email "test@test.com"', { cwd: repoDir });
+    await execAsync('git config user.name "Test"', { cwd: repoDir });
+    fs.writeFileSync(path.join(repoDir, 'README.md'), '# Test\n');
+    await execAsync('git add . && git commit -m "Initial commit"', { cwd: repoDir });
+    fs.mkdirSync(path.join(repoDir, '.stoneforge/.worktrees'), { recursive: true });
+
+    try {
+      const branch = await detectTargetBranch(repoDir);
+      expect(branch).toBe('master');
+    } finally {
+      rmrf(repoDir);
+    }
+  });
+
+  test('falls back to "main" when no known branches exist', async () => {
+    // Create a repo with a non-standard branch name
+    const repoDir = path.join('/tmp', `merge-test-custom-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    fs.mkdirSync(repoDir, { recursive: true });
+    await execAsync('git init -b custom-branch', { cwd: repoDir });
+    await execAsync('git config user.email "test@test.com"', { cwd: repoDir });
+    await execAsync('git config user.name "Test"', { cwd: repoDir });
+    fs.writeFileSync(path.join(repoDir, 'README.md'), '# Test\n');
+    await execAsync('git add . && git commit -m "Initial commit"', { cwd: repoDir });
+
+    try {
+      const branch = await detectTargetBranch(repoDir);
+      expect(branch).toBe('main'); // Ultimate fallback
+    } finally {
+      rmrf(repoDir);
+    }
+  });
 });
 
 describe('mergeBranch', () => {

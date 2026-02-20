@@ -9,6 +9,7 @@
 
 import type { Command, GlobalOptions, CommandResult, CommandOption } from '@stoneforge/quarry/cli';
 import { success, failure, ExitCode, getOutputMode } from '@stoneforge/quarry/cli';
+import { detectTargetBranch } from '../../git/merge.js';
 
 // ============================================================================
 // Types
@@ -41,33 +42,8 @@ async function detectCurrentBranch(cwd?: string): Promise<string> {
 }
 
 async function detectDefaultBranch(cwd?: string): Promise<string> {
-  // Try to detect from remote HEAD
-  try {
-    const { stdout } = await execAsync(
-      'git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null || echo ""',
-      { cwd }
-    );
-    const ref = stdout.trim();
-    if (ref) {
-      // refs/remotes/origin/main -> main
-      return ref.replace('refs/remotes/origin/', '');
-    }
-  } catch {
-    // Fall through
-  }
-
-  // Fallback: check if master or main exists
-  try {
-    await execAsync('git rev-parse --verify master', { cwd });
-    return 'master';
-  } catch {
-    try {
-      await execAsync('git rev-parse --verify main', { cwd });
-      return 'main';
-    } catch {
-      return 'master';
-    }
-  }
+  // Delegate to the canonical detectTargetBranch() for consistent detection
+  return detectTargetBranch(cwd ?? process.cwd());
 }
 
 // ============================================================================

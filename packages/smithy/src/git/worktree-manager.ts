@@ -25,6 +25,7 @@ import {
   generateWorktreePath,
   createSlugFromTitle,
 } from '../types/task-meta.js';
+import { detectTargetBranch } from './merge.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -1069,31 +1070,11 @@ export class WorktreeManagerImpl implements WorktreeManager {
   }
 
   private async detectDefaultBranch(): Promise<string> {
-    // Check config first
-    if (this.config.defaultBaseBranch) {
-      return this.config.defaultBaseBranch;
-    }
-
-    // Try to detect from remote
-    try {
-      const { stdout } = await this.execGit(['remote', 'show', 'origin']);
-      const match = stdout.match(/HEAD branch: (.+)/);
-      if (match) {
-        return match[1].trim();
-      }
-    } catch {
-      // No remote or error, continue
-    }
-
-    // Try common default branch names
-    for (const branch of ['main', 'master', 'develop']) {
-      if (await this.branchExists(branch)) {
-        return branch;
-      }
-    }
-
-    // Fall back to current branch
-    return this.getCurrentBranch();
+    // Delegate to the canonical detectTargetBranch(), passing config value
+    return detectTargetBranch(
+      this.config.workspaceRoot,
+      this.config.defaultBaseBranch || undefined
+    );
   }
 
   private async ensureGitignore(): Promise<void> {

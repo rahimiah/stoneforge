@@ -40,7 +40,7 @@ import {
 import type { TaskAssignmentService, TaskAssignment } from './task-assignment-service.js';
 import type { DispatchService } from './dispatch-service.js';
 import type { WorktreeManager } from '../git/worktree-manager.js';
-import { mergeBranch, syncLocalBranch, hasRemote } from '../git/merge.js';
+import { mergeBranch, syncLocalBranch, hasRemote, detectTargetBranch } from '../git/merge.js';
 import type { AgentRegistry } from './agent-registry.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -1023,28 +1023,12 @@ export class MergeStewardServiceImpl implements MergeStewardService {
       return this.targetBranch;
     }
 
-    if (this.config.targetBranch) {
-      this.targetBranch = this.config.targetBranch;
-      return this.targetBranch;
-    }
-
-    // Auto-detect via worktree manager if available
-    if (this.worktreeManager) {
-      this.targetBranch = await this.worktreeManager.getDefaultBranch();
-      return this.targetBranch;
-    }
-
-    // Fallback to detecting from git
-    try {
-      const { stdout } = await execAsync('git rev-parse --abbrev-ref HEAD', {
-        cwd: this.config.workspaceRoot,
-        encoding: 'utf8',
-      });
-      this.targetBranch = stdout.trim();
-      return this.targetBranch;
-    } catch {
-      return 'main';
-    }
+    // Delegate to the canonical detectTargetBranch(), passing config value
+    this.targetBranch = await detectTargetBranch(
+      this.config.workspaceRoot,
+      this.config.targetBranch
+    );
+    return this.targetBranch;
   }
 }
 

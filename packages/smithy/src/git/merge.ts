@@ -113,15 +113,35 @@ export async function hasRemote(
 }
 
 /**
- * Detect the default target branch for the repo by checking origin/HEAD,
- * then falling back to origin/main, then origin/master, then 'main'.
- * When no remote exists, falls back to local branch detection.
+ * Canonical branch detection function.
+ *
+ * All consumers in the codebase should delegate to this single function
+ * to ensure consistent default-branch detection everywhere. The unified
+ * fallback order is:
+ *
+ *  1. `configBaseBranch` (if provided — from user configuration)
+ *  2. `git symbolic-ref refs/remotes/origin/HEAD` (most reliable remote indicator)
+ *  3. `git remote show origin` HEAD branch (slower but authoritative)
+ *  4. Check existence of origin/main, then origin/master
+ *  5. Check existence of local main, then local master
+ *  6. Fallback: "main"
+ *
+ * @param workspaceRoot - The git repository root directory
+ * @param configBaseBranch - Optional config-provided base branch name (checked first)
  */
-export async function detectTargetBranch(workspaceRoot: string): Promise<string> {
+export async function detectTargetBranch(
+  workspaceRoot: string,
+  configBaseBranch?: string
+): Promise<string> {
+  // 1. Config value takes priority — if set, trust it unconditionally
+  if (configBaseBranch) {
+    return configBaseBranch;
+  }
+
   const remoteExists = await hasRemote(workspaceRoot);
 
   if (remoteExists) {
-    // Try origin/HEAD symref
+    // 2. Try origin/HEAD symref (most reliable)
     try {
       const { stdout } = await execAsync('git symbolic-ref refs/remotes/origin/HEAD', {
         cwd: workspaceRoot,
@@ -133,30 +153,36 @@ export async function detectTargetBranch(workspaceRoot: string): Promise<string>
       // Fall through
     }
 
-    // Try origin/main
+    // 3. Try `git remote show origin` HEAD branch
     try {
-      await execAsync('git rev-parse --verify origin/main', {
+      const { stdout } = await execAsync('git remote show origin', {
         cwd: workspaceRoot,
         encoding: 'utf8',
       });
-      return 'main';
+      const match = stdout.match(/HEAD branch: (.+)/);
+      if (match) {
+        const branch = match[1].trim();
+        if (branch && branch !== '(unknown)') return branch;
+      }
     } catch {
       // Fall through
     }
 
-    // Try origin/master
-    try {
-      await execAsync('git rev-parse --verify origin/master', {
-        cwd: workspaceRoot,
-        encoding: 'utf8',
-      });
-      return 'master';
-    } catch {
-      // Fall through
+    // 4. Check existence of origin/main, then origin/master
+    for (const name of ['main', 'master']) {
+      try {
+        await execAsync(`git rev-parse --verify origin/${name}`, {
+          cwd: workspaceRoot,
+          encoding: 'utf8',
+        });
+        return name;
+      } catch {
+        // Fall through
+      }
     }
   }
 
-  // No remote or remote detection failed — try local branches
+  // 5. No remote or remote detection failed — try local branches
   for (const name of ['main', 'master']) {
     try {
       await execAsync(`git rev-parse --verify refs/heads/${name}`, {
@@ -169,6 +195,7 @@ export async function detectTargetBranch(workspaceRoot: string): Promise<string>
     }
   }
 
+  // 6. Ultimate fallback
   return 'main';
 }
 
