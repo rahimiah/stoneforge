@@ -1,5 +1,12 @@
 # @stoneforge/smithy-web
 
+## 1.10.1
+
+### Patch Changes
+
+- 08ffa58: Add max depth guard to flattenFileTree to prevent stack overflow on deep file trees
+  - @stoneforge/ui@1.10.1
+
 ## 1.10.0
 
 ### Minor Changes

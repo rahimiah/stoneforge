@@ -1,5 +1,15 @@
 # @stoneforge/smithy
 
+## 1.10.1
+
+### Patch Changes
+
+- 08ffa58: Add `.stoneforge` to IGNORED_DIRECTORIES to prevent traversal into worktree directories
+  - @stoneforge/core@1.10.1
+  - @stoneforge/storage@1.10.1
+  - @stoneforge/quarry@1.10.1
+  - @stoneforge/shared-routes@1.10.1
+
 ## 1.10.0
 
 ### Minor Changes
