@@ -28,6 +28,7 @@ import {
   createWorkspaceFilesRoutes,
   createExtensionsRoutes,
   createSettingsRoutes,
+  createAssetRoutes,
   markDaemonAsServerManaged,
 } from './routes/index.js';
 // Shared collaborate routes
@@ -136,6 +137,7 @@ export async function startSmithyServer(options: SmithyServerOptions = {}): Prom
   app.route('/', createWorkspaceFilesRoutes());
   app.route('/', createExtensionsRoutes());
   app.route('/', createSettingsRoutes(services));
+  app.route('/', createAssetRoutes());
 
   app.route('/', createElementsRoutes(collaborateServices));
   app.route('/', createEntityRoutes(collaborateServices));
