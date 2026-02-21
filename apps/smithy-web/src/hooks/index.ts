@@ -72,3 +72,7 @@ export type {
   FileContentSearchOptions,
   UseFileContentSearchReturn,
 } from './useFileContentSearch';
+
+// Image drag-and-drop hook
+export { useImageDrop } from './useImageDrop';
+export type { UseImageDropConfig, UseImageDropReturn } from './useImageDrop';

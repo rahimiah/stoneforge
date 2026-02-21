@@ -62,6 +62,7 @@ import { MarkdownContent } from '../shared/MarkdownContent';
 import type { Task, Agent, Priority, TaskStatus, Complexity, MergeStatus, TaskSessionHistoryEntry } from '../../api/types';
 import { TranscriptViewer, messageToStreamEvent } from '../shared/TranscriptViewer';
 import type { StreamEvent } from '../workspace/types';
+import { useImageDrop } from '../../hooks/useImageDrop';
 
 interface TaskDetailPanelProps {
   taskId: string;
@@ -1361,6 +1362,38 @@ function EditableDescription({
   // Capture the initial length when entering edit mode to position cursor at end
   const initialLengthRef = useRef<number>(0);
 
+  // Image drag-and-drop support
+  const handleImageInsert = useCallback((markdown: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      // Fallback: append to end
+      setEditValue((prev) => prev + (prev ? '\n' : '') + markdown);
+      return;
+    }
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    setEditValue((prev) => {
+      const before = prev.slice(0, start);
+      const after = prev.slice(end);
+      // Add newlines around the image if needed
+      const prefix = before.length > 0 && !before.endsWith('\n') ? '\n' : '';
+      const suffix = after.length > 0 && !after.startsWith('\n') ? '\n' : '';
+      return before + prefix + markdown + suffix + after;
+    });
+    // Move cursor after the inserted markdown
+    requestAnimationFrame(() => {
+      if (textareaRef.current) {
+        const newPos = start + (start > 0 ? 1 : 0) + markdown.length;
+        textareaRef.current.setSelectionRange(newPos, newPos);
+        textareaRef.current.focus();
+      }
+    });
+  }, []);
+
+  const { dropHandlers, isDragging, isUploading } = useImageDrop({
+    onImageInsert: handleImageInsert,
+  });
+
   useEffect(() => {
     if (isEditing && textareaRef.current) {
       // Capture the current length when first entering edit mode
@@ -1405,17 +1438,46 @@ function EditableDescription({
             Ctrl+Enter to save, Esc to cancel
           </span>
         </div>
-        <div className="relative">
+        <div
+          className="relative"
+          onDragOver={dropHandlers.onDragOver}
+          onDragLeave={dropHandlers.onDragLeave}
+          onDrop={dropHandlers.onDrop}
+        >
           <textarea
             ref={textareaRef}
             value={editValue}
             onChange={(e) => setEditValue(e.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={dropHandlers.onPaste}
             rows={8}
             placeholder="Add a description (supports markdown)..."
             className="w-full p-3 text-sm border border-[var(--color-primary)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] bg-[var(--color-input-bg)] text-[var(--color-text)] resize-y min-h-[120px]"
             data-testid="task-description-input"
           />
+          {/* Image drag-and-drop overlay */}
+          {isDragging && (
+            <div
+              className="absolute inset-0 z-10 flex items-center justify-center rounded-lg border-2 border-dashed border-[var(--color-primary)] bg-[var(--color-primary)]/10 pointer-events-none"
+              data-testid="description-drop-overlay"
+            >
+              <span className="text-sm font-medium text-[var(--color-primary)]">
+                Drop image to upload
+              </span>
+            </div>
+          )}
+          {/* Upload progress indicator */}
+          {isUploading && (
+            <div
+              className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-[var(--color-bg)]/50 pointer-events-none"
+              data-testid="description-upload-overlay"
+            >
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--color-bg)] shadow border border-[var(--color-border)]">
+                <Loader2 className="w-4 h-4 animate-spin text-[var(--color-primary)]" />
+                <span className="text-sm text-[var(--color-text-secondary)]">Uploading image...</span>
+              </div>
+            </div>
+          )}
         </div>
         <div className="flex items-center justify-end gap-2 mt-2">
           {isUpdating && <Loader2 className="w-4 h-4 animate-spin text-[var(--color-text-tertiary)]" />}
@@ -1568,6 +1630,35 @@ export function ReopenDialog({
   const [message, setMessage] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Image drag-and-drop support
+  const handleImageInsert = useCallback((markdown: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      setMessage((prev) => prev + (prev ? '\n' : '') + markdown);
+      return;
+    }
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    setMessage((prev) => {
+      const before = prev.slice(0, start);
+      const after = prev.slice(end);
+      const prefix = before.length > 0 && !before.endsWith('\n') ? '\n' : '';
+      const suffix = after.length > 0 && !after.startsWith('\n') ? '\n' : '';
+      return before + prefix + markdown + suffix + after;
+    });
+    requestAnimationFrame(() => {
+      if (textareaRef.current) {
+        const newPos = start + (start > 0 ? 1 : 0) + markdown.length;
+        textareaRef.current.setSelectionRange(newPos, newPos);
+        textareaRef.current.focus();
+      }
+    });
+  }, []);
+
+  const { dropHandlers, isDragging, isUploading } = useImageDrop({
+    onImageInsert: handleImageInsert,
+  });
+
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.focus();
@@ -1602,15 +1693,46 @@ export function ReopenDialog({
           <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
             Message (optional)
           </label>
-          <textarea
-            ref={textareaRef}
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            placeholder="Why is this task being reopened?"
-            rows={3}
-            className="w-full p-3 text-sm border border-[var(--color-border)] rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 bg-[var(--color-input-bg)] text-[var(--color-text)] resize-y"
-            data-testid="reopen-message-input"
-          />
+          <div
+            className="relative"
+            onDragOver={dropHandlers.onDragOver}
+            onDragLeave={dropHandlers.onDragLeave}
+            onDrop={dropHandlers.onDrop}
+          >
+            <textarea
+              ref={textareaRef}
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              onPaste={dropHandlers.onPaste}
+              placeholder="Why is this task being reopened?"
+              rows={3}
+              className="w-full p-3 text-sm border border-[var(--color-border)] rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 bg-[var(--color-input-bg)] text-[var(--color-text)] resize-y"
+              data-testid="reopen-message-input"
+            />
+            {/* Image drag-and-drop overlay */}
+            {isDragging && (
+              <div
+                className="absolute inset-0 z-10 flex items-center justify-center rounded-lg border-2 border-dashed border-amber-500 bg-amber-500/10 pointer-events-none"
+                data-testid="reopen-drop-overlay"
+              >
+                <span className="text-sm font-medium text-amber-600 dark:text-amber-400">
+                  Drop image to upload
+                </span>
+              </div>
+            )}
+            {/* Upload progress indicator */}
+            {isUploading && (
+              <div
+                className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-[var(--color-bg)]/50 pointer-events-none"
+                data-testid="reopen-upload-overlay"
+              >
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--color-bg)] shadow border border-[var(--color-border)]">
+                  <Loader2 className="w-4 h-4 animate-spin text-amber-500" />
+                  <span className="text-sm text-[var(--color-text-secondary)]">Uploading image...</span>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
         <div className="mt-6 flex justify-end gap-3">
           <button
