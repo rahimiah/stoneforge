@@ -906,6 +906,46 @@ export function StreamViewer({
     }
   }, [apiUrl]);
 
+  // Image upload function - uses asset API for persistent git-tracked storage
+  const uploadImageFile = useCallback(async (file: File): Promise<string | null> => {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const base64 = btoa(
+        new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
+      );
+
+      const response = await fetch(`${apiUrl}/api/assets/upload`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          filename: file.name,
+          data: base64,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error?.message || `Upload failed: ${response.status}`);
+      }
+
+      const data = await response.json() as { path: string; filename: string; size: number; url: string };
+      return data.path;
+    } catch (error) {
+      console.error('[StreamViewer] Image upload failed:', error);
+      const errorEvent: StreamEvent = {
+        id: `error-${Date.now()}`,
+        type: 'error',
+        timestamp: Date.now(),
+        content: `Image upload failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        isError: true,
+      };
+      setEvents(prev => [...prev, errorEvent]);
+      return null;
+    }
+  }, [apiUrl]);
+
   // Check if drag event is an internal pane drag (not a file drop)
   const isPaneDrag = useCallback((e: React.DragEvent<HTMLDivElement>): boolean => {
     const types = Array.from(e.dataTransfer.types);
@@ -939,34 +979,42 @@ export function StreamViewer({
     };
     setEvents(prev => [...prev, uploadEvent]);
 
-    // Upload files and collect paths
-    const paths: string[] = [];
+    // Upload files and collect messages
+    const messages: string[] = [];
     for (const file of files) {
-      const path = await uploadFile(file);
-      if (path) {
-        paths.push(path);
+      if (file.type.startsWith('image/')) {
+        // Image files go to asset API for persistent git-tracked storage
+        const path = await uploadImageFile(file);
+        if (path) {
+          messages.push(`[Image uploaded: ${path}]`);
+        }
+      } else {
+        // Non-image files use the terminal upload endpoint
+        const path = await uploadFile(file);
+        if (path) {
+          messages.push(path);
+        }
       }
     }
 
     setIsUploading(false);
 
-    if (paths.length > 0) {
-      // Store paths for potential use, then send them directly
-      const pathsText = paths.join(' ');
+    if (messages.length > 0) {
+      const messagesText = messages.join('\n');
 
       // Add success notification with paths
       const successEvent: StreamEvent = {
         id: `system-${Date.now() + 1}`,
         type: 'system',
         timestamp: Date.now(),
-        content: `${paths.length} file(s) uploaded:\n${pathsText}`,
+        content: `${messages.length} file(s) uploaded:\n${messagesText}`,
       };
       setEvents(prev => [...prev, successEvent]);
 
-      // Automatically send the file paths as a message
-      await sendInput(pathsText);
+      // Automatically send the file messages as input
+      await sendInput(messagesText);
     }
-  }, [enableFileDrop, status, uploadFile, sendInput, isPaneDrag]);
+  }, [enableFileDrop, status, uploadFile, uploadImageFile, sendInput, isPaneDrag]);
 
   // Handle drag over
   const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
