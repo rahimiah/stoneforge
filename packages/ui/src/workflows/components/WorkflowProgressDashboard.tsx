@@ -396,10 +396,10 @@ function StepList({
       }
       dependsOn.get(dep.blockedId)!.push(dep.blockerId);
 
-      if (!blockedBy.has(dep.blockedId)) {
-        blockedBy.set(dep.blockedId, []);
+      if (!blockedBy.has(dep.blockerId)) {
+        blockedBy.set(dep.blockerId, []);
       }
-      blockedBy.get(dep.blockedId)!.push(dep.blockerId);
+      blockedBy.get(dep.blockerId)!.push(dep.blockedId);
     }
 
     return { dependsOnMap: dependsOn, blockedByMap: blockedBy };

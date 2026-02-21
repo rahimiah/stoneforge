@@ -50,10 +50,10 @@ export default defineConfig({
   build: {
     outDir: resolve(__dirname, '../../packages/smithy/web'),
     emptyOutDir: true,
-    minify: 'esbuild',
+    minify: false,
     target: 'es2020',
     cssCodeSplit: true,
-    sourcemap: false,
+    sourcemap: true,
     rollupOptions: {
       output: {
         manualChunks: {

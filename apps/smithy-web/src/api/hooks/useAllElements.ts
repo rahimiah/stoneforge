@@ -6,7 +6,7 @@
  */
 
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 import type { WebSocketEvent } from '@stoneforge/ui';
 
 // ============================================================================
@@ -204,7 +204,8 @@ export function useAllElements() {
 
   // Populate individual caches when data loads
   const data = query.data;
-  if (data) {
+  useEffect(() => {
+    if (!data) return;
     // Set individual type caches
     if (data.data.task) {
       queryClient.setQueryData(ELEMENT_KEYS.tasks, data.data.task.items);
@@ -233,7 +234,7 @@ export function useAllElements() {
     if (data.data.library) {
       queryClient.setQueryData(ELEMENT_KEYS.libraries, data.data.library.items);
     }
-  }
+  }, [data, queryClient]);
 
   return {
     isLoading: query.isLoading,

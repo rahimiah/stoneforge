@@ -1705,7 +1705,27 @@ export class DispatchDaemonImpl implements DispatchDaemon {
     const meta = getAgentMetadata(agent);
     if (!meta) return undefined;
 
-    // Get the configured executable for this agent
+    // When a fallback chain is configured, it is the authoritative list of
+    // available executables. Check it first before resolving per-agent defaults.
+    const fallbackChain = this.settingsService?.getAgentDefaults().fallbackChain ?? [];
+
+    if (fallbackChain.length > 0) {
+      // If all executables in the chain are limited, we can't dispatch
+      if (this.rateLimitTracker.isAllLimited(fallbackChain)) {
+        return 'all_limited';
+      }
+
+      // Find the first available executable in the chain
+      const available = this.rateLimitTracker.getAvailableExecutable(fallbackChain);
+      if (!available) {
+        return 'all_limited';
+      }
+
+      // Return the available executable as an override path
+      return available;
+    }
+
+    // No fallback chain — check the agent's effective executable directly
     const agentExecutablePath = (meta as { executablePath?: string }).executablePath;
     const providerName = (meta as { provider?: string }).provider ?? 'claude-code';
 
@@ -1720,27 +1740,10 @@ export class DispatchDaemonImpl implements DispatchDaemon {
       effectiveExecutable = providerName;
     }
 
-    // Check if the effective executable is rate-limited
-    if (!this.rateLimitTracker.isLimited(effectiveExecutable)) {
-      return undefined; // Primary is fine, no override needed
-    }
-
-    // Primary is limited — try fallback chain
-    const fallbackChain = this.settingsService?.getAgentDefaults().fallbackChain ?? [];
-    if (fallbackChain.length === 0) {
-      // No fallback chain configured, can't dispatch
+    if (this.rateLimitTracker.isLimited(effectiveExecutable)) {
       return 'all_limited';
     }
-
-    const available = this.rateLimitTracker.getAvailableExecutable(fallbackChain);
-    if (!available) {
-      return 'all_limited';
-    }
-
-    logger.info(
-      `Executable '${effectiveExecutable}' is rate-limited, falling back to '${available}'`
-    );
-    return available;
+    return undefined;
   }
 
   /**
