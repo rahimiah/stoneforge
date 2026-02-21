@@ -159,7 +159,7 @@ sf migrate [--dry-run]
 Reset a Stoneforge workspace.
 
 ```bash
-sf reset [--force] [--full] [--server <url>]
+sf reset [--force] [--full] [-s, --server <url>]
 ```
 
 **Default reset** removes the database, sync files, uploads, and worktrees but preserves `config.yaml`. **Full reset** deletes the entire `.stoneforge/` folder and reinitializes.
@@ -418,7 +418,7 @@ sf workflow create <playbook> [--var name=value] [--ephemeral] [--title <text>]
 ```bash
 sf workflow list [--status <s>] [--ephemeral] [--durable] [--limit <n>]
 sf workflow show <id>
-sf workflow tasks <id> [--ready] [--status <s>]
+sf workflow tasks <id> [--ready] [--status <s>] [--limit <n>]
 sf workflow progress <id>
 ```
 
@@ -526,7 +526,7 @@ sf document reindex
 ### `sf channel create`
 
 ```bash
-sf channel create --name <name> [--description <text>] [--type group|direct] [--visibility public|private] [--policy open|invite-only|request] [--member <id>]
+sf channel create --name <name> [--description <text>] [--type group|direct] [--visibility public|private] [--policy open|invite-only|request] [--member <id>] [--direct <entity>] [--tag <tag>]
 ```
 
 ### `sf channel list`
@@ -573,6 +573,8 @@ sf message send --reply-to <msg-id> -m "Reply text"      # Reply
 | `-m, --content <text>` | Message content |
 | `--file <path>` | Read content from file |
 | `-a, --attachment <id>` | Attach document (repeatable) |
+| `-t, --thread <id>` | Thread ID to reply to |
+| `--tag <tag>` | Add tag (repeatable) |
 
 ### `sf message reply`
 
@@ -585,7 +587,7 @@ sf message reply <msg-id> --content "Thanks!"
 ### `sf message list / thread`
 
 ```bash
-sf message list --channel <id> [--sender <id>] [--rootOnly] [--limit <n>]
+sf message list --channel <id> [--sender <id>] [--root-only] [--limit <n>]
 sf message thread <msg-id> [--limit <n>]
 ```
 

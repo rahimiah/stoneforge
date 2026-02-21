@@ -1011,7 +1011,7 @@ List workflows.
 
 ```bash
 sf workflow list
-sf workflow list --status active
+sf workflow list --status running
 sf workflow list --ephemeral
 sf workflow list --durable --limit 10
 ```
