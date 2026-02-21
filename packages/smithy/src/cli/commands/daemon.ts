@@ -17,7 +17,7 @@ import { success, failure, ExitCode, getOutputMode } from '@stoneforge/quarry/cl
 // Constants
 // ============================================================================
 
-const DEFAULT_SERVER_URL = 'http://localhost:3456';
+const DEFAULT_SERVER_URL = 'http://localhost:3457';
 
 // ============================================================================
 // Shared Helpers
