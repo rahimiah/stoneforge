@@ -177,7 +177,7 @@ Roles are configured through `RoleDefinitionService`:
 ```typescript
 import { createRoleDefinitionService } from '@stoneforge/smithy';
 
-const roleDefService = createRoleDefinitionService(api, storage);
+const roleDefService = createRoleDefinitionService(api);
 
 // Create a custom worker role
 const roleDef = await roleDefService.createRoleDefinition({
@@ -265,7 +265,7 @@ Active agents are tracked in the `AgentRegistry`:
 ```typescript
 import { createAgentRegistry } from '@stoneforge/smithy';
 
-const registry = createAgentRegistry(storage, api);
+const registry = createAgentRegistry(api);
 
 // Register an agent
 const agent = await registry.registerAgent({

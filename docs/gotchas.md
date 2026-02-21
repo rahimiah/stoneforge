@@ -104,7 +104,7 @@ Common pitfalls and their solutions, organized by severity and category.
 ## Playbooks
 
 - Variable substitution uses `{{varName}}` syntax - pattern: `/\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}/g`
-- Playbook inheritance requires separate resolution via `resolvePlaybookHierarchy()`
+- Playbook inheritance requires separate resolution via `resolvePlaybookInheritance()`
 - YAML uses snake_case (`task_type`, `depends_on`) vs camelCase in code
 
 ## Services
