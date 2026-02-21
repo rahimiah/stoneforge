@@ -2194,7 +2194,7 @@ sf merge --cleanup --message "docs: automated documentation fixes"
 | Command                                    | Description                            |
 | ------------------------------------------ | -------------------------------------- |
 | `sf task handoff <id>`                     | Hand off task to another agent         |
-| `sf task complete <id>`                    | Complete task and create merge request (not CLOSED/REVIEW)     |
+| `sf task complete <id>`                    | Complete task and create merge request (task must not be CLOSED/REVIEW) |
 | `sf task sync <id>`                        | Sync task branch with main             |
 | `sf task merge <id>`                       | Squash-merge task branch and close it  |
 | `sf task reject <id>`                      | Mark merge as failed and reopen task   |

@@ -142,7 +142,7 @@ interface Message extends Element {
 interface Document extends Element {
   type: 'document';
   title?: string;                       // Optional display title
-  contentType: ContentType;
+  readonly contentType: ContentType;
   content: string;
   version: number;                      // Starts at 1
   previousVersionId: DocumentId | null; // null for version 1
