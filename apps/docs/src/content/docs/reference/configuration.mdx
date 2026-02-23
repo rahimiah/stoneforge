@@ -24,6 +24,8 @@ The `.stoneforge/config.yaml` file is created by `sf init` and controls project-
 ```yaml title=".stoneforge/config.yaml"
 actor: default-agent
 
+base_branch: master  # optional, auto-detected from git if omitted
+
 database: stoneforge.db
 
 sync:
@@ -53,6 +55,7 @@ plugins:
 
 <ParamTable title="General" params={[
   { name: 'actor', type: 'string', description: 'Default actor name for operations. Can be an entity name or ID.' },
+  { name: 'baseBranch', type: 'string', description: 'Base branch for merge targets (e.g., master or main). Auto-detected from git if omitted.' },
   { name: 'database', type: 'string', default: 'stoneforge.db', description: 'SQLite database filename, relative to .stoneforge/.' },
 ]} />
 
@@ -101,6 +104,7 @@ In addition to `config.yaml`, Stoneforge has **runtime settings** managed by the
 | Variable | Config path | Example |
 | --- | --- | --- |
 | `STONEFORGE_ACTOR` | `actor` | `agent-1` |
+| `STONEFORGE_BASE_BRANCH` | `baseBranch` | `main` |
 | `STONEFORGE_DB` | `database` | `stoneforge.db` |
 | `STONEFORGE_SYNC_AUTO_EXPORT` | `sync.autoExport` | `true` |
 | `STONEFORGE_IDENTITY_MODE` | `identity.mode` | `cryptographic` |
@@ -189,7 +193,7 @@ const { value, source } = getValueWithSource('actor');
 Available config paths:
 
 ```
-actor, database,
+actor, baseBranch, database,
 sync.autoExport, sync.exportDebounce, sync.elementsFile, sync.dependenciesFile,
 playbooks.paths,
 tombstone.ttl, tombstone.minTtl,
@@ -240,8 +244,8 @@ import {
 
 const path = getConfigPath();
 const exists = configFileExists();
-const discovery = discoverConfigFile('/project');
-// { exists: boolean, path?: string }
+const discovery = discoverConfigFile(undefined, '/project');
+// { exists: boolean, path?: string, stoneforgeDir?: string }
 ```
 
 ### Validation

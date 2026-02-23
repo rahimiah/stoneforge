@@ -18,9 +18,11 @@ packages/smithy/src/prompts/
 ├── director.md           # Director role
 ├── worker.md             # Ephemeral worker role
 ├── persistent-worker.md  # Persistent worker role
+├── message-triage.md     # Message triage (used by triage sessions)
 ├── steward-base.md       # Base steward (all focuses)
 ├── steward-merge.md      # Merge focus addendum
-└── steward-docs.md       # Docs focus addendum
+├── steward-docs.md       # Docs focus addendum
+└── steward-recovery.md   # Recovery focus addendum
 ```
 
 **Note:** The worker prompt is selected automatically based on `workerMode`. Ephemeral workers get `worker.md`, persistent workers get `persistent-worker.md`. You can override either by placing the corresponding file in `.stoneforge/prompts/`.

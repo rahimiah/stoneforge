@@ -165,6 +165,7 @@ The `.stoneforge/config.yaml` file controls project-level settings:
 
 <ParamTable params={[
   { name: 'actor', type: 'string', description: 'Default actor name or ID for operations.' },
+  { name: 'base_branch', type: 'string', description: 'Base branch for merge targets (e.g., master or main). Auto-detected from git if omitted.' },
   { name: 'database', type: 'string', default: 'stoneforge.db', description: 'SQLite database filename, relative to .stoneforge/.' },
   { name: 'sync.auto_export', type: 'boolean', default: 'true', description: 'Automatically export mutations to JSONL files.' },
   { name: 'sync.export_debounce', type: 'number', default: '300000', description: 'Debounce interval in ms for batching exports (5 minutes).' },

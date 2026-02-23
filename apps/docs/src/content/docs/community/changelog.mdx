@@ -13,6 +13,41 @@ All notable changes to Stoneforge are documented here. Versions are released as 
 
 ---
 
+## v1.10.2
+
+<small>February 21, 2026</small>
+
+### Bug fixes
+
+- **CLI help text** — fixed history command help text: corrected short flag from `-n` to `-l` for `--limit` option
+
+---
+
+## v1.10.1
+
+<small>February 21, 2026</small>
+
+### Maintenance
+
+- Dependency updates across all packages
+
+---
+
+## v1.10.0
+
+<small>February 20, 2026</small>
+
+### New features
+
+- **`baseBranch` configuration** — new optional `baseBranch` config field for explicitly setting the merge target branch. Supports config file (`base_branch`), environment variable (`STONEFORGE_BASE_BRANCH`), and CLI override. When unset, existing auto-detection behavior is preserved.
+
+### Bug fixes
+
+- **CLI kebab-case flags** — fixed CLI parser to accept kebab-case flags for camelCase options (e.g., `--reply-to`, `--root-only`, `--doc-version`). Both kebab-case and camelCase forms are now accepted.
+- **`sf install skills`** — fixed `sf install skills` failing to find skills in NPM installs by correcting package resolution from `@stoneforge/orchestrator-sdk` to `@stoneforge/smithy`
+
+---
+
 ## v1.9.0
 
 <small>February 19, 2026</small>
