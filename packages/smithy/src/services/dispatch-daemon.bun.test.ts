@@ -69,14 +69,14 @@ function createMockSessionManager(): SessionManager {
         lastActivityAt: createTimestamp(),
       };
       sessions.set(agentId, session);
-      return { session, events: null };
+      return { session, events: new EventEmitter() };
     }),
     getActiveSession: mock((agentId: EntityId) => {
       return sessions.get(agentId) ?? null;
     }),
     stopSession: mock(async () => {}),
     suspendSession: mock(async () => {}),
-    resumeSession: mock(async () => ({ session: {} as SessionRecord, events: null })),
+    resumeSession: mock(async () => ({ session: {} as SessionRecord, events: new EventEmitter() })),
     getSession: mock(() => undefined),
     listSessions: mock(() => []),
     messageSession: mock(async () => ({ success: true })),
@@ -2314,7 +2314,7 @@ describe('spawnRecoveryStewardForTask - atomic worker unassignment', () => {
         startedAt: createTimestamp(),
         lastActivityAt: createTimestamp(),
       };
-      return { session, events: null };
+      return { session, events: new EventEmitter() };
     });
 
     // Override api.update to fail after session start for the task metadata update
@@ -2495,7 +2495,7 @@ describe('recoverOrphanedAssignments - recovery steward cascade prevention', () 
         };
         // Don't store in sessions map — simulates session dying immediately
         // so getActiveSession returns null
-        return { session, events: null };
+        return { session, events: new EventEmitter() };
       }
     );
 
@@ -2549,7 +2549,7 @@ describe('recoverOrphanedAssignments - recovery steward cascade prevention', () 
           startedAt: createTimestamp(),
           lastActivityAt: createTimestamp(),
         };
-        return { session, events: null };
+        return { session, events: new EventEmitter() };
       }
     );
 
@@ -2590,7 +2590,7 @@ describe('recoverOrphanedAssignments - recovery steward cascade prevention', () 
           startedAt: createTimestamp(),
           lastActivityAt: createTimestamp(),
         };
-        return { session, events: null };
+        return { session, events: new EventEmitter() };
       }
     );
 
