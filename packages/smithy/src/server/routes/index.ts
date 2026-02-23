@@ -22,3 +22,4 @@ export { createExtensionsRoutes } from './extensions.js';
 export { createSettingsRoutes } from './settings.js';
 export { createAssetRoutes } from './assets.js';
 export { createMetricsRoutes } from './metrics.js';
+export { createDiagnosticsRoutes } from './diagnostics.js';

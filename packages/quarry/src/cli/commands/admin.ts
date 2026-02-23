@@ -475,7 +475,220 @@ async function doctorHandler(
     }
   }
 
+  // 11. Runtime diagnostics from smithy-server
+  await collectRuntimeDiagnostics(diagnostics, options);
+
   return buildDoctorResult(diagnostics, options, repairs);
+}
+
+// ============================================================================
+// Runtime Diagnostics (via smithy-server API)
+// ============================================================================
+
+/**
+ * Default smithy-server URL for diagnostics API
+ */
+const DEFAULT_SMITHY_URL = 'http://localhost:3457';
+
+/**
+ * Diagnostics response from the smithy-server API
+ */
+interface RuntimeDiagnosticsResponse {
+  timestamp: string;
+  rateLimits: {
+    isPaused: boolean;
+    limits: Array<{ executable: string; resetsAt: string }>;
+    soonestReset?: string;
+  };
+  stuckTasks: Array<{
+    taskId: string;
+    title: string;
+    status: string;
+    assignee?: string;
+    resumeCount: number;
+    mergeStatus?: string;
+  }>;
+  mergeQueue: {
+    awaitingMergeCount: number;
+    stuckInTestingCount: number;
+    stuckInMergingCount: number;
+    stuckTasks: Array<{
+      taskId: string;
+      title: string;
+      mergeStatus: string;
+      updatedAt: string;
+    }>;
+  };
+  errorRate: {
+    lastHourCount: number;
+    lastDayCount: number;
+  };
+  agentPool: {
+    totalAgents: number;
+    idleAgents: number;
+    busyAgents: number;
+    utilizationPercent: number;
+    sessions: Array<{
+      agentId: string;
+      agentName: string;
+      role: string;
+      sessionId: string;
+      durationMs: number;
+    }>;
+  };
+}
+
+/**
+ * Fetches and evaluates runtime diagnostics from the smithy-server API.
+ * Gracefully skips if smithy-server is not available.
+ */
+async function collectRuntimeDiagnostics(
+  diagnostics: DiagnosticResult[],
+  options: GlobalOptions
+): Promise<void> {
+  const smithyUrl = process.env.ORCHESTRATOR_URL || DEFAULT_SMITHY_URL;
+  const diagnosticsUrl = `${smithyUrl}/api/health/diagnostics`;
+
+  let data: RuntimeDiagnosticsResponse;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const response = await fetch(diagnosticsUrl, { signal: controller.signal });
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      diagnostics.push({
+        name: 'runtime',
+        status: 'warning',
+        message: `smithy-server returned ${response.status} from diagnostics endpoint`,
+      });
+      return;
+    }
+
+    data = (await response.json()) as RuntimeDiagnosticsResponse;
+  } catch {
+    diagnostics.push({
+      name: 'runtime',
+      status: 'warning',
+      message: 'smithy-server not available — runtime checks skipped',
+      details: { url: diagnosticsUrl },
+    });
+    return;
+  }
+
+  // --- Rate Limits ---
+  if (data.rateLimits.limits.length > 0) {
+    const limitNames = data.rateLimits.limits.map((l) => l.executable).join(', ');
+    const resetTimes = data.rateLimits.limits
+      .map((l) => `${l.executable} resets at ${new Date(l.resetsAt).toLocaleTimeString()}`)
+      .join('; ');
+    diagnostics.push({
+      name: 'rate_limits',
+      status: 'warning',
+      message: `Rate limited: ${limitNames}. ${resetTimes}`,
+      details: options.verbose
+        ? {
+            isPaused: data.rateLimits.isPaused,
+            limits: data.rateLimits.limits,
+            soonestReset: data.rateLimits.soonestReset,
+          }
+        : undefined,
+    });
+  } else {
+    diagnostics.push({
+      name: 'rate_limits',
+      status: 'ok',
+      message: 'No rate limits active',
+    });
+  }
+
+  // --- Stuck Tasks ---
+  if (data.stuckTasks.length > 0) {
+    const taskList = data.stuckTasks
+      .map((t) => `${t.taskId} (${t.title}, resumeCount=${t.resumeCount})`)
+      .join('; ');
+    diagnostics.push({
+      name: 'stuck_tasks',
+      status: 'error',
+      message: `${data.stuckTasks.length} stuck task(s): ${taskList}`,
+      details: options.verbose ? { tasks: data.stuckTasks } : undefined,
+    });
+  } else {
+    diagnostics.push({
+      name: 'stuck_tasks',
+      status: 'ok',
+      message: 'No stuck tasks detected',
+    });
+  }
+
+  // --- Merge Queue ---
+  const mergeStuckCount =
+    data.mergeQueue.stuckInTestingCount + data.mergeQueue.stuckInMergingCount;
+  if (mergeStuckCount > 0) {
+    const stuckDetails = data.mergeQueue.stuckTasks
+      .map((t) => `${t.taskId} (${t.mergeStatus})`)
+      .join('; ');
+    diagnostics.push({
+      name: 'merge_queue',
+      status: 'warning',
+      message: `${mergeStuckCount} task(s) stuck in merge pipeline: ${stuckDetails}. ${data.mergeQueue.awaitingMergeCount} awaiting merge.`,
+      details: options.verbose
+        ? {
+            awaitingMerge: data.mergeQueue.awaitingMergeCount,
+            stuckInTesting: data.mergeQueue.stuckInTestingCount,
+            stuckInMerging: data.mergeQueue.stuckInMergingCount,
+            stuckTasks: data.mergeQueue.stuckTasks,
+          }
+        : undefined,
+    });
+  } else {
+    diagnostics.push({
+      name: 'merge_queue',
+      status: 'ok',
+      message: `Merge queue healthy. ${data.mergeQueue.awaitingMergeCount} task(s) awaiting merge.`,
+    });
+  }
+
+  // --- Error Rate ---
+  const errorHour = data.errorRate.lastHourCount;
+  const errorDay = data.errorRate.lastDayCount;
+  if (errorHour > 20) {
+    diagnostics.push({
+      name: 'error_rate',
+      status: 'error',
+      message: `High error rate: ${errorHour} errors in the last hour, ${errorDay} in the last day`,
+      details: { lastHourCount: errorHour, lastDayCount: errorDay },
+    });
+  } else if (errorHour > 5) {
+    diagnostics.push({
+      name: 'error_rate',
+      status: 'warning',
+      message: `Elevated error rate: ${errorHour} errors in the last hour, ${errorDay} in the last day`,
+      details: { lastHourCount: errorHour, lastDayCount: errorDay },
+    });
+  } else {
+    diagnostics.push({
+      name: 'error_rate',
+      status: 'ok',
+      message: `Error rate normal: ${errorHour} errors in the last hour, ${errorDay} in the last day`,
+    });
+  }
+
+  // --- Agent Pool ---
+  diagnostics.push({
+    name: 'agent_pool',
+    status: 'ok',
+    message: `Agent pool: ${data.agentPool.busyAgents}/${data.agentPool.totalAgents} busy (${data.agentPool.utilizationPercent}% utilization)`,
+    details: options.verbose
+      ? {
+          totalAgents: data.agentPool.totalAgents,
+          idleAgents: data.agentPool.idleAgents,
+          busyAgents: data.agentPool.busyAgents,
+          utilizationPercent: data.agentPool.utilizationPercent,
+          sessions: data.agentPool.sessions,
+        }
+      : undefined,
+  });
 }
 
 /**
@@ -697,6 +910,8 @@ export const doctorCommand: Command = {
   help: `Check system health and diagnose issues.
 
 Performs the following checks:
+
+Database health:
 - Workspace exists (.stoneforge directory)
 - Database file exists and can be opened
 - Schema version is current
@@ -705,6 +920,13 @@ Performs the following checks:
 - Foreign key constraint validation
 - Blocked cache consistency
 - Storage statistics
+
+Runtime health (via smithy-server, skipped if unavailable):
+- Rate limit status: which executables are limited, when they reset
+- Stuck tasks: tasks with high resumeCount and no active session
+- Merge queue health: tasks stuck in testing/merging
+- Error rate: recent errors from operation log
+- Agent pool: utilization and active sessions
 
 Use --verbose to see detailed diagnostic information.
 Use --fix to automatically repair detected issues:
