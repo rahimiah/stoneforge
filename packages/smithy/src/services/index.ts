@@ -243,3 +243,16 @@ export {
   // Factory
   createSettingsService,
 } from './settings-service.js';
+
+// Metrics service
+export {
+  // Types
+  type MetricOutcome,
+  type RecordMetricInput,
+  type TimeRange,
+  type AggregatedMetrics,
+  type TimeSeriesPoint,
+  type MetricsService,
+  // Factory
+  createMetricsService,
+} from './metrics-service.js';

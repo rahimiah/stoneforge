@@ -28,6 +28,7 @@ import {
   createMergeStewardService,
   createDocsStewardService,
   createSettingsService,
+  createMetricsService,
   createRateLimitTracker,
   GitRepositoryNotFoundError,
   type OrchestratorAPI,
@@ -46,6 +47,8 @@ import {
   type MergeStewardService,
   type DocsStewardService,
   type SettingsService,
+  type MetricsService,
+  type MetricOutcome,
   type OnSessionStartedCallback,
   trackListeners,
 } from '../index.js';
@@ -86,6 +89,7 @@ export interface Services {
   sessionInitialPrompts: Map<string, string>;
   sessionMessageService: SessionMessageService;
   settingsService: SettingsService;
+  metricsService: MetricsService;
   storageBackend: StorageBackend;
 }
 
@@ -117,6 +121,9 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
 
   // Create settings service early so it can be injected into session manager
   const settingsService = createSettingsService(storageBackend);
+
+  // Create metrics service for provider usage tracking
+  const metricsService = createMetricsService(storageBackend);
 
   const sessionManager = createSessionManager(spawnerService, api, agentRegistry, settingsService);
   const sessionInitialPrompts = new Map<string, string>();
@@ -283,10 +290,61 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
         }
       };
 
+      // Track metrics state for this session
+      const sessionStartTime = Date.now();
+      let metricsRecorded = false;
+      let sessionOutcome: MetricOutcome = 'completed';
+      let sessionInputTokens = 0;
+      let sessionOutputTokens = 0;
+
+      // Helper to record metrics once on session completion
+      const recordSessionMetrics = () => {
+        if (metricsRecorded) return;
+        metricsRecorded = true;
+
+        const durationMs = Date.now() - sessionStartTime;
+        const provider = 'claude-code';
+
+        // Look up the task ID from the agent's current assignment (best-effort)
+        taskAssignmentService.getAgentTasks(agentId)
+          .then(tasks => {
+            const taskId = tasks.length > 0 ? tasks[0].taskId : undefined;
+            metricsService.record({
+              provider,
+              sessionId: session.id,
+              taskId,
+              inputTokens: sessionInputTokens,
+              outputTokens: sessionOutputTokens,
+              durationMs,
+              outcome: sessionOutcome,
+            });
+          })
+          .catch(() => {
+            // If task lookup fails, record without task ID
+            metricsService.record({
+              provider,
+              sessionId: session.id,
+              inputTokens: sessionInputTokens,
+              outputTokens: sessionOutputTokens,
+              durationMs,
+              outcome: sessionOutcome,
+            });
+          });
+      };
+
       // Auto-terminate sessions when they emit a 'result' event
       // This handles ephemeral worker sessions completing their tasks
-      const onResultEvent = (event: { type: string }) => {
+      const onResultEvent = (event: { type: string; raw?: { usage?: { input_tokens?: number; output_tokens?: number } } }) => {
         if (event.type === 'result') {
+          // Extract token counts from the result event if available
+          const usage = event.raw?.usage;
+          if (usage) {
+            sessionInputTokens = usage.input_tokens ?? 0;
+            sessionOutputTokens = usage.output_tokens ?? 0;
+          }
+          sessionOutcome = 'completed';
+          recordSessionMetrics();
+
           logger.debug(`Session ${session.id} emitted result, auto-terminating`);
           sessionManager.stopSession(session.id, {
             graceful: true,
@@ -300,7 +358,12 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
 
       // Clean up onResultEvent listener on session exit to prevent leaks
       // This handles sessions that terminate without emitting a 'result' event
-      const onExit = () => {
+      const onExit = (code?: number) => {
+        // If metrics haven't been recorded yet (no result event), record on exit
+        if (!metricsRecorded) {
+          sessionOutcome = (code && code !== 0) ? 'failed' : 'completed';
+          recordSessionMetrics();
+        }
         cleanup();
       };
 
@@ -354,6 +417,7 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
     sessionInitialPrompts,
     sessionMessageService,
     settingsService,
+    metricsService,
     storageBackend,
   };
 }
