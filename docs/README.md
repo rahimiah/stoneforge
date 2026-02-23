@@ -89,6 +89,13 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for full architecture details.
 | Dependency type | `types/dependency.ts` | `types/dependency.bun.test.ts` |
 | Event type | `types/event.ts` | `types/event.bun.test.ts` |
 | Inbox type | `types/inbox.ts` | `types/inbox.bun.test.ts` |
+| Element base type | `types/element.ts` | `types/element.bun.test.ts` |
+| Library type | `types/library.ts` | `types/library.bun.test.ts` |
+| Team type | `types/team.ts` | `types/team.bun.test.ts` |
+| Playbook type | `types/playbook.ts` | `types/playbook.bun.test.ts` |
+| Playbook YAML type | `types/playbook-yaml.ts` | `types/playbook-yaml.bun.test.ts` |
+| Workflow create helpers | `types/workflow-create.ts` | `types/workflow-create.bun.test.ts` |
+| Workflow operations | `types/workflow-ops.ts` | - |
 | ID generator | `id/generator.ts` | `id/generator.bun.test.ts` |
 | Error codes | `errors/codes.ts` | `errors/codes.bun.test.ts` |
 
@@ -159,6 +166,9 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for full architecture details.
 | Inbox routes | `inbox.ts` | - |
 | Plan routes | `plans.ts` | - |
 | Task routes | `tasks.ts` | - |
+| WebSocket types | `ws/types.ts` | - |
+| WebSocket handler | `ws/handler.ts` | - |
+| WebSocket broadcaster | `ws/broadcaster.ts` | - |
 
 ## File Map (@stoneforge/smithy)
 
@@ -181,6 +191,10 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for full architecture details.
 | Session manager | `runtime/session-manager.ts` | `runtime/session-manager.bun.test.ts` |
 | Handoff service | `runtime/handoff.ts` | `runtime/handoff.bun.test.ts` |
 | Message mapper | `runtime/message-mapper.ts` | - |
+| Predecessor query service | `runtime/predecessor-query.ts` | `runtime/predecessor-query.bun.test.ts` |
+| Runtime event utils | `runtime/event-utils.ts` | - |
+| Settings service | `services/settings-service.ts` | `services/settings-service.bun.test.ts` |
+| Rate limit tracker | `services/rate-limit-tracker.ts` | `services/rate-limit-tracker.bun.test.ts` |
 | Prompts | `prompts/index.ts` | `prompts/index.bun.test.ts` |
 | Persistent worker prompt | `prompts/persistent-worker.md` | - |
 | Message triage prompt | `prompts/message-triage.md` | - |
