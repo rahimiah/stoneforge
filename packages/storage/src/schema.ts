@@ -14,7 +14,7 @@ import type { Migration, MigrationResult, StorageBackend } from './index.js';
 /**
  * Current schema version
  */
-export const CURRENT_SCHEMA_VERSION = 9;
+export const CURRENT_SCHEMA_VERSION = 10;
 
 // ============================================================================
 // Migrations
@@ -403,9 +403,71 @@ DROP TABLE IF EXISTS settings;
 };
 
 /**
+ * Migration 10: Add operation_log and provider_metrics tables
+ *
+ * operation_log: Persistent storage for structured operation logs (dispatch,
+ * merge, session, rate-limit, steward, recovery events).
+ *
+ * provider_metrics: Tracks per-request LLM provider metrics including token
+ * counts, latency, and outcome for cost/performance monitoring.
+ */
+const migration010: Migration = {
+  version: 10,
+  description: 'Add operation_log and provider_metrics tables for observability',
+  up: `
+-- Operation log for structured system events
+CREATE TABLE operation_log (
+    id TEXT PRIMARY KEY,
+    timestamp TEXT NOT NULL,
+    level TEXT NOT NULL CHECK (level IN ('error', 'warn', 'info')),
+    category TEXT NOT NULL CHECK (category IN ('dispatch', 'merge', 'session', 'rate-limit', 'steward', 'recovery')),
+    agent_id TEXT,
+    task_id TEXT,
+    message TEXT NOT NULL,
+    details TEXT
+);
+
+-- Indexes for operation_log queries
+CREATE INDEX idx_operation_log_timestamp ON operation_log(timestamp);
+CREATE INDEX idx_operation_log_category_timestamp ON operation_log(category, timestamp);
+CREATE INDEX idx_operation_log_level_timestamp ON operation_log(level, timestamp);
+
+-- Provider metrics for LLM usage tracking
+CREATE TABLE provider_metrics (
+    id TEXT PRIMARY KEY,
+    timestamp TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT,
+    session_id TEXT NOT NULL,
+    task_id TEXT,
+    input_tokens INTEGER DEFAULT 0,
+    output_tokens INTEGER DEFAULT 0,
+    duration_ms INTEGER DEFAULT 0,
+    outcome TEXT NOT NULL CHECK (outcome IN ('completed', 'failed', 'rate_limited', 'handoff'))
+);
+
+-- Indexes for provider_metrics queries
+CREATE INDEX idx_provider_metrics_provider_timestamp ON provider_metrics(provider, timestamp);
+CREATE INDEX idx_provider_metrics_timestamp ON provider_metrics(timestamp);
+`,
+  down: `
+-- Drop indexes first
+DROP INDEX IF EXISTS idx_provider_metrics_timestamp;
+DROP INDEX IF EXISTS idx_provider_metrics_provider_timestamp;
+DROP INDEX IF EXISTS idx_operation_log_level_timestamp;
+DROP INDEX IF EXISTS idx_operation_log_category_timestamp;
+DROP INDEX IF EXISTS idx_operation_log_timestamp;
+
+-- Drop tables
+DROP TABLE IF EXISTS provider_metrics;
+DROP TABLE IF EXISTS operation_log;
+`,
+};
+
+/**
  * All migrations in order
  */
-export const MIGRATIONS: readonly Migration[] = [migration001, migration002, migration003, migration004, migration005, migration006, migration007, migration008, migration009];
+export const MIGRATIONS: readonly Migration[] = [migration001, migration002, migration003, migration004, migration005, migration006, migration007, migration008, migration009, migration010];
 
 // ============================================================================
 // Schema Functions
@@ -496,6 +558,8 @@ export const EXPECTED_TABLES = [
   'documents_fts',
   'document_embeddings',
   'settings',
+  'operation_log',
+  'provider_metrics',
 ] as const;
 
 /**
