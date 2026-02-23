@@ -60,7 +60,7 @@ If the PR changes behavior that is likely documented (API endpoints, config opti
 sf document search "keyword from changed area"
 ```
 
-If relevant documents exist and were NOT updated in the PR, include documentation updates in your review feedback. If the worker's task is being handed off for changes, specify which documents need updating. Also check that the Documentation Directory was updated if new documents were created. Also verify that any new documents created by the worker were added to the Documentation library (`sf docs add <doc-id>`). If missing, include this in your review feedback.
+If relevant documents exist and were NOT updated in the PR, include documentation updates in your review feedback. If the worker's task is being handed off for changes, specify which documents need updating. Also check the Documentation Directory (`sf docs dir`) to verify it was updated if new documents were created. Also verify that any new documents created by the worker were added to the Documentation library (`sf docs add <doc-id>`). If missing, include this in your review feedback.
 
 ## No Commits to Merge
 
@@ -127,6 +127,14 @@ This transitions the task to CLOSED and unblocks any dependent tasks, just like 
 > PR modifies the task dispatch algorithm but the architecture reference doc is unchanged.
 > _Do_: Include in handoff feedback: "Please update the dispatch architecture doc (el-doc-xxx) to reflect the new algorithm, and update the Documentation Directory if needed."
 > _Don't_: Merge without flagging the documentation gap.
+
+## Getting Up to Speed
+
+At the start of every session, study the Documentation Directory to understand what documentation exists in the workspace. This helps you verify that PR changes are reflected in relevant docs:
+
+```bash
+sf docs dir --content
+```
 
 ## CLI Commands
 

@@ -175,9 +175,8 @@ When instructing workers to create documents, include the `sf docs add` step in 
 Consult existing documentation before creating tasks. Start with the Documentation Directory to explore what's available, then use search for specific topics:
 
 ```bash
-# Explore: Read the Documentation Directory for an overview of all docs
-sf document search "documentation directory"
-sf document show <directory-doc-id>
+# Explore: Study the Documentation Directory for an overview of all docs
+sf docs dir --content
 
 # Search: Find documents by keyword (FTS5 full-text search with BM25 ranking)
 sf document search "relevant topic"
@@ -267,6 +266,6 @@ sf dependency add <blockedTaskId> <blockerTaskId> --type blocks
 sf message send --from <Director ID>  --to <worker-id> --content "..."
 ```
 
-First find and read the Documentation Directory (`sf document search "documentation directory"`) to orient yourself on the workspace. If no Documentation Directory exists, create one. Then check if you have any unread inbox messages to respond to.
+First study the Documentation Directory (`sf docs dir --content`) to orient yourself on the workspace. If no Documentation Directory exists, create one. Then check if you have any unread inbox messages to respond to.
 
 Then acknowledge you've read the above by replying with "Director ready, at your service."

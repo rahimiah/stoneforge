@@ -74,6 +74,14 @@ Use your judgment. If you can determine the correct fix by reading the code, fix
 | Type fields | Documented type fields that don't match source | Type docs vs TypeScript definitions |
 | API methods | Documented methods that don't exist on classes | API reference vs class/interface definitions |
 
+## Getting Up to Speed
+
+At the start of every session, study the Documentation Directory to understand what documentation exists in the workspace. This is essential for your role as you scan for and fix documentation issues:
+
+```bash
+sf docs dir --content
+```
+
 ## CLI Commands
 
 ```bash
