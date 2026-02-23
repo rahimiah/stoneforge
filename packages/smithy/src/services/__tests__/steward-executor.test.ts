@@ -31,6 +31,8 @@ import {
 import type { MergeStewardService } from '../merge-steward-service.js';
 import type { DocsStewardService } from '../docs-steward-service.js';
 import type { SessionManager } from '../../runtime/session-manager.js';
+import type { RateLimitTracker } from '../rate-limit-tracker.js';
+import type { SettingsService, ServerAgentDefaults } from '../settings-service.js';
 
 // ============================================================================
 // Test Helpers
@@ -157,6 +159,8 @@ function createDeps(overrides: Partial<StewardExecutorDeps> = {}): StewardExecut
     docsStewardService: overrides.docsStewardService ?? createMockDocsStewardService(),
     sessionManager: overrides.sessionManager ?? createMockSessionManager(),
     projectRoot: overrides.projectRoot ?? '/tmp/test-project',
+    rateLimitTracker: overrides.rateLimitTracker,
+    settingsService: overrides.settingsService,
   };
 }
 
@@ -367,6 +371,237 @@ describe('Steward Executor Integration Tests', () => {
       expect(successHistory.length).toBe(1);
 
       await scheduler.stop();
+    });
+  });
+});
+
+// ============================================================================
+// Rate Limit Guard Tests
+// ============================================================================
+
+function createMockRateLimitTracker(allLimited: boolean): RateLimitTracker {
+  return {
+    markLimited: vi.fn(),
+    isLimited: vi.fn(() => allLimited),
+    getAvailableExecutable: vi.fn(() => allLimited ? undefined : 'claude'),
+    getSoonestResetTime: vi.fn(() => undefined),
+    getAllLimits: vi.fn(() => []),
+    isAllLimited: vi.fn(() => allLimited),
+    clear: vi.fn(),
+  } as unknown as RateLimitTracker;
+}
+
+function createMockSettingsService(overrides?: {
+  fallbackChain?: string[];
+  defaultExecutablePaths?: Record<string, string>;
+}): SettingsService {
+  const agentDefaults: ServerAgentDefaults = {
+    defaultExecutablePaths: overrides?.defaultExecutablePaths ?? {},
+    fallbackChain: overrides?.fallbackChain,
+  };
+
+  return {
+    getSetting: vi.fn(() => undefined),
+    setSetting: vi.fn(() => agentDefaults),
+    deleteSetting: vi.fn(() => false),
+    getAgentDefaults: vi.fn(() => agentDefaults),
+    setAgentDefaults: vi.fn(() => agentDefaults),
+  } as unknown as SettingsService;
+}
+
+describe('Steward Executor Rate Limit Guards', () => {
+  // --------------------------------------------------------------------------
+  // Docs steward rate limit checks
+  // --------------------------------------------------------------------------
+  describe('docs steward rate limit check', () => {
+    it('should skip session spawn when all executables are rate-limited', async () => {
+      const rateLimitTracker = createMockRateLimitTracker(true);
+      const settingsService = createMockSettingsService({
+        fallbackChain: ['claude', 'claude-backup'],
+      });
+      const sessionManager = createMockSessionManager();
+
+      const deps = createDeps({ rateLimitTracker, settingsService, sessionManager });
+      const executor = createStewardExecutor(deps);
+
+      const docsSteward = createMockAgentEntity('docs-steward-1', 'DocsScanner', 'docs');
+
+      const result = await executor(docsSteward, {
+        trigger: { type: 'cron' as const, schedule: '0 */6 * * *' },
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('All executables rate-limited');
+      expect(result.output).toContain('All executables rate-limited');
+      expect(result.output).toContain('DocsScanner');
+      expect(result.itemsProcessed).toBe(0);
+      expect(rateLimitTracker.isAllLimited).toHaveBeenCalledWith(['claude', 'claude-backup']);
+      // Session should NOT have been started
+      expect(sessionManager.startSession).not.toHaveBeenCalled();
+    });
+
+    it('should proceed with session spawn when not all executables are limited', async () => {
+      const rateLimitTracker = createMockRateLimitTracker(false);
+      const settingsService = createMockSettingsService({
+        fallbackChain: ['claude', 'claude-backup'],
+      });
+      const sessionManager = createMockSessionManager();
+
+      const deps = createDeps({ rateLimitTracker, settingsService, sessionManager });
+      const executor = createStewardExecutor(deps);
+
+      const docsSteward = createMockAgentEntity('docs-steward-1', 'DocsScanner', 'docs');
+
+      const result = await executor(docsSteward, {
+        trigger: { type: 'cron' as const, schedule: '0 */6 * * *' },
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Spawned docs steward session');
+      expect(sessionManager.startSession).toHaveBeenCalledTimes(1);
+    });
+
+    it('should proceed when fallback chain is empty (no rate limit config)', async () => {
+      const rateLimitTracker = createMockRateLimitTracker(true);
+      const settingsService = createMockSettingsService({
+        fallbackChain: [],
+      });
+      const sessionManager = createMockSessionManager();
+
+      const deps = createDeps({ rateLimitTracker, settingsService, sessionManager });
+      const executor = createStewardExecutor(deps);
+
+      const docsSteward = createMockAgentEntity('docs-steward-1', 'DocsScanner', 'docs');
+
+      const result = await executor(docsSteward, {
+        trigger: { type: 'cron' as const, schedule: '0 */6 * * *' },
+      });
+
+      // Empty fallback chain => skip rate limit check, proceed normally
+      expect(result.success).toBe(true);
+      expect(sessionManager.startSession).toHaveBeenCalledTimes(1);
+      expect(rateLimitTracker.isAllLimited).not.toHaveBeenCalled();
+    });
+
+    it('should proceed when no rateLimitTracker is provided (backwards compat)', async () => {
+      const sessionManager = createMockSessionManager();
+      const deps = createDeps({ sessionManager });
+      const executor = createStewardExecutor(deps);
+
+      const docsSteward = createMockAgentEntity('docs-steward-1', 'DocsScanner', 'docs');
+
+      const result = await executor(docsSteward, {
+        trigger: { type: 'cron' as const, schedule: '0 */6 * * *' },
+      });
+
+      expect(result.success).toBe(true);
+      expect(sessionManager.startSession).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Custom steward rate limit checks
+  // --------------------------------------------------------------------------
+  describe('custom steward rate limit check', () => {
+    function createCustomStewardEntity(
+      id: string,
+      name: string,
+      playbook: string
+    ): AgentEntity {
+      const metadata: StewardMetadata = {
+        agentRole: 'steward',
+        stewardFocus: 'custom',
+        triggers: [],
+        sessionStatus: 'idle',
+        playbook,
+      };
+
+      return {
+        id,
+        type: 'entity',
+        name,
+        entityType: EntityTypeValue.AGENT,
+        createdBy: 'test-user' as EntityId,
+        createdAt: createTimestamp(),
+        updatedAt: createTimestamp(),
+        version: 1,
+        metadata: { agent: metadata },
+        tags: [],
+      } as unknown as AgentEntity;
+    }
+
+    it('should skip session spawn when all executables are rate-limited', async () => {
+      const rateLimitTracker = createMockRateLimitTracker(true);
+      const settingsService = createMockSettingsService({
+        fallbackChain: ['claude', 'claude-backup'],
+      });
+      const sessionManager = createMockSessionManager();
+
+      const deps = createDeps({ rateLimitTracker, settingsService, sessionManager });
+      const executor = createStewardExecutor(deps);
+
+      const customSteward = createCustomStewardEntity(
+        'custom-steward-1',
+        'CustomBot',
+        'Run daily report generation'
+      );
+
+      const result = await executor(customSteward, {
+        trigger: { type: 'cron' as const, schedule: '0 0 * * *' },
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('All executables rate-limited');
+      expect(result.output).toContain('All executables rate-limited');
+      expect(result.output).toContain('CustomBot');
+      expect(result.itemsProcessed).toBe(0);
+      expect(rateLimitTracker.isAllLimited).toHaveBeenCalledWith(['claude', 'claude-backup']);
+      // Session should NOT have been started
+      expect(sessionManager.startSession).not.toHaveBeenCalled();
+    });
+
+    it('should proceed with session spawn when not all executables are limited', async () => {
+      const rateLimitTracker = createMockRateLimitTracker(false);
+      const settingsService = createMockSettingsService({
+        fallbackChain: ['claude', 'claude-backup'],
+      });
+      const sessionManager = createMockSessionManager();
+
+      const deps = createDeps({ rateLimitTracker, settingsService, sessionManager });
+      const executor = createStewardExecutor(deps);
+
+      const customSteward = createCustomStewardEntity(
+        'custom-steward-1',
+        'CustomBot',
+        'Run daily report generation'
+      );
+
+      const result = await executor(customSteward, {
+        trigger: { type: 'cron' as const, schedule: '0 0 * * *' },
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Spawned custom steward session');
+      expect(sessionManager.startSession).toHaveBeenCalledTimes(1);
+    });
+
+    it('should proceed when no rateLimitTracker is provided (backwards compat)', async () => {
+      const sessionManager = createMockSessionManager();
+      const deps = createDeps({ sessionManager });
+      const executor = createStewardExecutor(deps);
+
+      const customSteward = createCustomStewardEntity(
+        'custom-steward-1',
+        'CustomBot',
+        'Run daily report generation'
+      );
+
+      const result = await executor(customSteward, {
+        trigger: { type: 'cron' as const, schedule: '0 0 * * *' },
+      });
+
+      expect(result.success).toBe(true);
+      expect(sessionManager.startSession).toHaveBeenCalledTimes(1);
     });
   });
 });

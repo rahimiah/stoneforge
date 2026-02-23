@@ -40,6 +40,8 @@ import type { AgentRegistry, AgentEntity } from './agent-registry.js';
 import { getAgentMetadata } from './agent-registry.js';
 import type { MergeStewardService } from './merge-steward-service.js';
 import type { DocsStewardService } from './docs-steward-service.js';
+import type { RateLimitTracker } from './rate-limit-tracker.js';
+import type { SettingsService } from './settings-service.js';
 import { createLogger } from '../utils/logger.js';
 
 const logger = createLogger('steward-scheduler');
@@ -1260,6 +1262,19 @@ export interface StewardExecutorDeps {
    */
   resolvePlaybookContent?: (playbookId: string) => Promise<string | undefined>;
   /**
+   * Optional rate limit tracker to check whether all executables are
+   * rate-limited before spawning a steward session (docs, custom).
+   * When provided alongside settingsService, the executor will skip
+   * session spawns if every executable in the fallback chain is limited.
+   */
+  rateLimitTracker?: RateLimitTracker;
+  /**
+   * Optional settings service used to resolve the executable fallback chain
+   * for rate limit checks. Required alongside rateLimitTracker for the
+   * rate limit guard to function.
+   */
+  settingsService?: SettingsService;
+  /**
    * Idle timeout in ms for spawned steward sessions (docs, custom).
    * If no session events are received within this window, the session
    * is force-terminated. Default: 120000 (2 minutes).
@@ -1425,6 +1440,21 @@ export function createStewardExecutor(deps: StewardExecutorDeps): StewardExecuto
             };
           }
 
+          // Check rate limits before spawning a session
+          if (deps.rateLimitTracker && deps.settingsService) {
+            const fallbackChain = deps.settingsService.getAgentDefaults().fallbackChain ?? [];
+            if (fallbackChain.length > 0 && deps.rateLimitTracker.isAllLimited(fallbackChain)) {
+              logger.warn(`All executables rate-limited, skipping ${focus} steward '${steward.name}'`);
+              return {
+                success: false,
+                error: 'All executables rate-limited',
+                output: `All executables rate-limited, skipping ${focus} steward '${steward.name}'`,
+                durationMs: Date.now() - startTime,
+                itemsProcessed: 0,
+              };
+            }
+          }
+
           const roleResult = loadRolePrompt('steward', focus as StewardFocus, {
             projectRoot: deps.projectRoot,
           });
@@ -1469,6 +1499,21 @@ export function createStewardExecutor(deps: StewardExecutorDeps): StewardExecuto
               durationMs: Date.now() - startTime,
               itemsProcessed: 0,
             };
+          }
+
+          // Check rate limits before spawning a session
+          if (deps.rateLimitTracker && deps.settingsService) {
+            const fallbackChain = deps.settingsService.getAgentDefaults().fallbackChain ?? [];
+            if (fallbackChain.length > 0 && deps.rateLimitTracker.isAllLimited(fallbackChain)) {
+              logger.warn(`All executables rate-limited, skipping custom steward '${steward.name}'`);
+              return {
+                success: false,
+                error: 'All executables rate-limited',
+                output: `All executables rate-limited, skipping custom steward '${steward.name}'`,
+                durationMs: Date.now() - startTime,
+                itemsProcessed: 0,
+              };
+            }
           }
 
           // Build prompt from steward base + custom playbook

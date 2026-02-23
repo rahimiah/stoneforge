@@ -28,6 +28,7 @@ import {
   createMergeStewardService,
   createDocsStewardService,
   createSettingsService,
+  createRateLimitTracker,
   GitRepositoryNotFoundError,
   type OrchestratorAPI,
   type AgentRegistry,
@@ -174,11 +175,15 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
     workspaceRoot: projectRoot,
   });
 
+  const rateLimitTracker = createRateLimitTracker();
+
   const stewardExecutor = createStewardExecutor({
     mergeStewardService,
     docsStewardService,
     sessionManager,
     projectRoot,
+    rateLimitTracker,
+    settingsService,
     resolvePlaybookContent: async (playbookId: string): Promise<string | undefined> => {
       const playbook = await api.get<Playbook>(playbookId as ElementId);
       if (!playbook) return undefined;
@@ -265,11 +270,16 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
         isError: false,
       });
 
-      // Listen for rate_limited events from sessions and forward to daemon's tracker
+      // Listen for rate_limited events from sessions and forward to trackers
       const onRateLimited = (data: { executablePath?: string; resetsAt?: Date; message?: string }) => {
-        if (dispatchDaemon && data.executablePath) {
+        if (data.executablePath) {
           const resetTime = data.resetsAt ?? getFallbackResetTime(data.message ?? '');
-          dispatchDaemon.handleRateLimitDetected(data.executablePath, resetTime);
+          // Forward to dispatch daemon's internal tracker
+          if (dispatchDaemon) {
+            dispatchDaemon.handleRateLimitDetected(data.executablePath, resetTime);
+          }
+          // Forward to steward executor's tracker
+          rateLimitTracker.markLimited(data.executablePath, resetTime);
         }
       };
 
