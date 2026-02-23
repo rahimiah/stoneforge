@@ -1416,6 +1416,7 @@ Convenience shortcuts for documentation infrastructure.
 | --------------------------------- | ----------------------------------------------------- |
 | `sf docs init`                    | Bootstrap Documentation library and directory         |
 | `sf docs add <doc-id> [doc-id2]`  | Add document(s) to the Documentation library          |
+| `sf docs dir`                     | Show the Documentation Directory document             |
 
 #### docs init
 
@@ -1439,6 +1440,21 @@ Add one or more documents to the Documentation library. The library must exist (
 sf docs add el-doc123
 sf docs add el-doc123 el-doc456 el-doc789
 sf docs add el-doc123 --json
+```
+
+#### docs dir
+
+Find and display the Documentation Directory document. Shows the ID and title of the directory. Use `--content` to also display the full markdown content. The Documentation Directory must exist (run `sf docs init` first).
+
+| Option | Description |
+|--------|-------------|
+| `--content` | Include the full document content in output |
+
+```bash
+sf docs dir
+sf docs dir --content
+sf docs dir --json
+sf docs dir --quiet
 ```
 
 ---
