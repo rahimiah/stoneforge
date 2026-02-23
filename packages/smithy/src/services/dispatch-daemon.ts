@@ -487,11 +487,14 @@ export class DispatchDaemonImpl implements DispatchDaemon {
   private readonly forwardingInboxItems = new Set<string>();
 
   /**
-   * When true, the startup background orphan recovery is still in flight.
-   * runPollCycle skips its own orphan recovery to avoid duplicate work and
-   * to prevent the initial poll cycle from blocking on stale session resumes.
+   * Resolves once the startup background orphan recovery has completed (or
+   * was skipped).  `runPollCycle` awaits this promise before running its own
+   * orphan recovery, which eliminates the TOCTOU race that existed with the
+   * previous boolean flag: the flag could be cleared between the check and the
+   * call, allowing both the startup recovery and the poll-cycle recovery to
+   * run concurrently on the same tasks.
    */
-  private startupRecoveryInFlight = false;
+  private startupRecoveryDone: Promise<void> = Promise.resolve();
 
   /**
    * Cached result of target branch detection.
@@ -566,28 +569,28 @@ export class DispatchDaemonImpl implements DispatchDaemon {
       logger.error('Failed to reconcile on startup:', error);
     }
 
-    // Option A (non-blocking startup recovery): Orphan recovery may block for a
-    // long time if it encounters stale session IDs from before a server restart.
-    // The resumeSession → spawn → waitForInit path will wait for the full timeout
-    // duration on dead sessions. By running orphan recovery in the background and
-    // starting the poll loop first, we ensure tasks are dispatched within the first
-    // poll interval regardless of how long recovery takes.
+    // Non-blocking startup recovery: Orphan recovery may block for a long time
+    // if it encounters stale session IDs from before a server restart.  The
+    // resumeSession → spawn → waitForInit path will wait for the full timeout
+    // duration on dead sessions.  By running orphan recovery in the background
+    // and starting the poll loop first, we ensure tasks are dispatched within
+    // the first poll interval regardless of how long recovery takes.
     //
-    // While startup recovery is in flight, runPollCycle skips its own orphan
-    // recovery call to avoid duplicate work. Once the background recovery finishes,
-    // the flag is cleared and subsequent poll cycles handle orphan recovery normally.
+    // runPollCycle awaits this.startupRecoveryDone before running its own
+    // orphan recovery, which serialises the two without the TOCTOU race that
+    // existed with the old boolean flag.
 
-    // Run orphan recovery in the background — don't block the poll loop
+    // Run orphan recovery in the background — don't block the poll loop.
+    // We store the full promise chain (including then/catch) so that
+    // runPollCycle can simply `await this.startupRecoveryDone` and be
+    // guaranteed the startup recovery has finished before it starts its own.
     if (this.config.orphanRecoveryEnabled) {
-      this.startupRecoveryInFlight = true;
-      this.recoverOrphanedAssignments().then((result) => {
+      this.startupRecoveryDone = this.recoverOrphanedAssignments().then((result) => {
         if (result.processed > 0) {
           logger.info(`Startup: recovered ${result.processed} orphaned task assignment(s)`);
         }
       }).catch((error) => {
         logger.error('Failed to recover orphaned assignments on startup:', error);
-      }).finally(() => {
-        this.startupRecoveryInFlight = false;
       });
     }
 
@@ -1686,9 +1689,11 @@ export class DispatchDaemonImpl implements DispatchDaemon {
       // Recover orphaned assignments first — workers with tasks but no session
       // (e.g. from mid-cycle crashes). Runs before availability polling so
       // orphans are handled before they'd be skipped.
-      // Skip if startup recovery is still in flight to avoid duplicate work
-      // and prevent blocking the poll cycle on stale session resumes.
-      if (this.config.orphanRecoveryEnabled && !this.startupRecoveryInFlight) {
+      // We await startupRecoveryDone to ensure the startup background recovery
+      // has finished before we start our own, preventing concurrent runs on the
+      // same tasks.
+      if (this.config.orphanRecoveryEnabled) {
+        await this.startupRecoveryDone;
         await this.recoverOrphanedAssignments();
       }
 

@@ -2651,7 +2651,7 @@ describe('startup non-blocking orphan recovery', () => {
     }
   });
 
-  test('poll loop starts even if orphan recovery takes a long time', async () => {
+  test('start() returns promptly even if orphan recovery takes a long time', async () => {
     const config: DispatchDaemonConfig = {
       pollIntervalMs: 50,
       workerAvailabilityPollEnabled: true,
@@ -2673,14 +2673,14 @@ describe('startup non-blocking orphan recovery', () => {
       config
     );
 
-    // Track poll cycle events to verify the poll loop is running
+    // Track poll cycle events to verify poll cycles resume after recovery completes
     const pollEvents: string[] = [];
     daemon.on('poll:start', (type: string) => pollEvents.push(`start:${type}`));
     daemon.on('poll:complete', () => pollEvents.push('complete'));
 
     // Override recoverOrphanedAssignments to simulate a long-running recovery
     // that blocks for a long time (stale session resume scenario)
-    let recoveryStarted = false;
+    let recoveryCallCount = 0;
     let resolveRecovery: (() => void) | undefined;
     const recoveryPromise = new Promise<void>((resolve) => {
       resolveRecovery = resolve;
@@ -2688,31 +2688,39 @@ describe('startup non-blocking orphan recovery', () => {
 
     const impl = daemon as DispatchDaemonImpl;
     impl.recoverOrphanedAssignments = async () => {
-      recoveryStarted = true;
-      await recoveryPromise;
+      recoveryCallCount++;
+      if (recoveryCallCount === 1) {
+        // Only block on the first call (startup recovery)
+        await recoveryPromise;
+      }
       return { pollType: 'orphan-recovery' as const, startedAt: new Date().toISOString(), processed: 0, errors: 0, errorMessages: [], durationMs: 0 };
     };
 
     // Start the daemon — this should NOT block on orphan recovery
+    const startTime = Date.now();
     await daemon.start();
+    const startDuration = Date.now() - startTime;
 
-    // The poll loop should be running. Wait for at least one poll cycle to complete.
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    // start() should return near-instantly (well under 1s)
+    expect(startDuration).toBeLessThan(1000);
 
     // Orphan recovery was started in the background
-    expect(recoveryStarted).toBe(true);
+    expect(recoveryCallCount).toBe(1);
 
-    // Poll events should have fired, proving the poll loop started despite
-    // orphan recovery still being in progress. The initial runPollCycle skips
-    // orphan recovery (startupRecoveryInFlight flag) so it doesn't block.
+    // Poll cycles are blocked waiting for startup recovery, so no poll events yet
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(pollEvents.length).toBe(0);
+
+    // Resolve the startup recovery — poll cycles should now proceed
+    resolveRecovery!();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    // Poll events should have fired after startup recovery completed
     expect(pollEvents.length).toBeGreaterThan(0);
     expect(pollEvents.some((e) => e.startsWith('start:'))).toBe(true);
-
-    // Clean up: resolve the blocked recovery so it doesn't leak
-    resolveRecovery!();
   });
 
-  test('tasks are dispatched within the first poll interval even if orphan recovery is still running', async () => {
+  test('tasks are dispatched promptly once startup orphan recovery completes', async () => {
     const config: DispatchDaemonConfig = {
       pollIntervalMs: 50,
       workerAvailabilityPollEnabled: true,
@@ -2749,28 +2757,101 @@ describe('startup non-blocking orphan recovery', () => {
     });
     await api.create(task as unknown as Record<string, unknown> & { createdBy: EntityId });
 
-    // Override orphan recovery to block indefinitely — simulates stale session resume
+    // Override orphan recovery: first call (startup) blocks briefly, subsequent calls resolve fast
+    let recoveryCallCount = 0;
     let resolveRecovery: (() => void) | undefined;
     const impl = daemon as DispatchDaemonImpl;
     impl.recoverOrphanedAssignments = async () => {
-      await new Promise<void>((resolve) => {
-        resolveRecovery = resolve;
-      });
+      recoveryCallCount++;
+      if (recoveryCallCount === 1) {
+        // Simulate slow startup recovery, then resolve quickly
+        await new Promise<void>((resolve) => {
+          resolveRecovery = resolve;
+        });
+      }
       return { pollType: 'orphan-recovery' as const, startedAt: new Date().toISOString(), processed: 0, errors: 0, errorMessages: [], durationMs: 0 };
     };
 
-    // Start the daemon — orphan recovery runs in background, poll loop starts immediately
+    // Start the daemon — orphan recovery runs in background, poll loop awaits it
     await daemon.start();
 
-    // Wait for the initial poll cycle to complete and dispatch the task
+    // No dispatch yet — poll cycle is waiting on startup recovery
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(sessionManager.startSession).not.toHaveBeenCalled();
+
+    // Release startup recovery — poll cycle should now proceed to dispatch
+    resolveRecovery!();
     await new Promise((resolve) => setTimeout(resolve, 300));
 
-    // The worker should have had a session started — meaning a task was dispatched
-    // by the initial poll cycle, even while orphan recovery is still blocked
+    // The worker should have had a session started — task was dispatched
+    // once the serialized startup recovery + poll-cycle recovery completed
     expect(sessionManager.startSession).toHaveBeenCalled();
+  });
 
-    // Clean up
+  test('recoverOrphanedAssignments is never called concurrently (startup vs poll cycle)', async () => {
+    const config: DispatchDaemonConfig = {
+      pollIntervalMs: 50,
+      workerAvailabilityPollEnabled: true,
+      inboxPollEnabled: false,
+      stewardTriggerPollEnabled: false,
+      workflowTaskPollEnabled: false,
+      orphanRecoveryEnabled: true,
+    };
+
+    daemon = createDispatchDaemon(
+      api,
+      agentRegistry,
+      sessionManager,
+      dispatchService,
+      worktreeManager,
+      taskAssignment,
+      stewardScheduler,
+      inboxService,
+      config
+    );
+
+    // Track concurrent invocations of recoverOrphanedAssignments.
+    // If the promise-based latch works correctly, the count should never exceed 1.
+    let activeCalls = 0;
+    let maxConcurrentCalls = 0;
+    let totalCalls = 0;
+    let resolveRecovery: (() => void) | undefined;
+
+    const impl = daemon as DispatchDaemonImpl;
+    impl.recoverOrphanedAssignments = async () => {
+      activeCalls++;
+      totalCalls++;
+      maxConcurrentCalls = Math.max(maxConcurrentCalls, activeCalls);
+      // Simulate slow recovery so that poll cycles overlap with it
+      await new Promise<void>((resolve) => {
+        // If this is the startup call, hold it for a while.
+        // Otherwise resolve quickly.
+        if (totalCalls === 1) {
+          resolveRecovery = resolve;
+        } else {
+          setTimeout(resolve, 10);
+        }
+      });
+      activeCalls--;
+      return { pollType: 'orphan-recovery' as const, startedAt: new Date().toISOString(), processed: 0, errors: 0, errorMessages: [], durationMs: 0 };
+    };
+
+    // Start the daemon — startup recovery fires in the background
+    await daemon.start();
+
+    // Let several poll intervals fire while startup recovery is still held
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    // Release the startup recovery
     resolveRecovery!();
+
+    // Wait for a few more poll cycles to complete now that recovery is unblocked
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    // The critical assertion: at no point were there concurrent calls
+    expect(maxConcurrentCalls).toBe(1);
+    // And the method was actually called more than once (startup + poll cycles)
+    expect(totalCalls).toBeGreaterThan(1);
   });
 });
 
