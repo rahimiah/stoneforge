@@ -435,6 +435,9 @@ export {
   prepareDeleteWorkflow,
 } from './workflow-ops.js';
 
+// External Sync exports
+export * from './external-sync.js';
+
 // Inbox exports
 export {
   // Types and interfaces
