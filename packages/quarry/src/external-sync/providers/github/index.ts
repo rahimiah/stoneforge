@@ -1,8 +1,35 @@
 /**
  * GitHub Provider — exports for the GitHub external sync provider
  *
- * Currently exports only the placeholder provider. The full implementation
- * (API client, task adapter, field mapping) will be added in later tasks.
+ * Exports the full GitHub provider implementation, task adapter,
+ * field mapping configuration, and API client.
  */
 
-export { createGitHubPlaceholderProvider } from './github-provider.js';
+// Provider factories
+export { createGitHubProvider, createGitHubPlaceholderProvider } from './github-provider.js';
+
+// Task adapter
+export { GitHubTaskAdapter } from './github-task-adapter.js';
+
+// Field mapping configuration
+export {
+  GITHUB_FIELD_MAP_CONFIG,
+  GITHUB_PRIORITY_LABELS,
+  GITHUB_TASK_TYPE_LABELS,
+  GITHUB_SYNC_LABEL_PREFIX,
+  statusToGitHubState,
+  gitHubStateToStatus,
+} from './github-field-map.js';
+
+// API client (re-export for convenience)
+export { GitHubApiClient, GitHubApiError, isGitHubApiError } from './github-api.js';
+export type {
+  GitHubIssue,
+  GitHubLabel,
+  GitHubUser,
+  GitHubApiClientOptions,
+  ListIssuesOptions,
+  CreateIssueInput,
+  UpdateIssueInput,
+  RateLimitInfo,
+} from './github-api.js';

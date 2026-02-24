@@ -42,4 +42,27 @@ export type {
 } from './sync-engine.js';
 
 // GitHub provider
-export { createGitHubPlaceholderProvider } from './providers/github/index.js';
+export {
+  createGitHubProvider,
+  createGitHubPlaceholderProvider,
+  GitHubTaskAdapter,
+  GITHUB_FIELD_MAP_CONFIG,
+  GITHUB_PRIORITY_LABELS,
+  GITHUB_TASK_TYPE_LABELS,
+  GITHUB_SYNC_LABEL_PREFIX,
+  statusToGitHubState,
+  gitHubStateToStatus,
+  GitHubApiClient,
+  GitHubApiError,
+  isGitHubApiError,
+} from './providers/github/index.js';
+export type {
+  GitHubIssue,
+  GitHubLabel,
+  GitHubUser,
+  GitHubApiClientOptions,
+  ListIssuesOptions,
+  CreateIssueInput,
+  UpdateIssueInput,
+  RateLimitInfo,
+} from './providers/github/index.js';
