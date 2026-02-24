@@ -23,3 +23,4 @@ export { createSettingsRoutes } from './settings.js';
 export { createAssetRoutes } from './assets.js';
 export { createMetricsRoutes } from './metrics.js';
 export { createDiagnosticsRoutes } from './diagnostics.js';
+export { createExternalSyncRoutes } from './external-sync.js';
