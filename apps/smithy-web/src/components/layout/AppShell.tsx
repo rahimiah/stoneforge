@@ -9,6 +9,7 @@ import { Sidebar } from './Sidebar';
 import { MobileDrawer, UserSelector } from '@stoneforge/ui';
 import { DirectorPanel } from './DirectorPanel';
 import { DaemonToggle } from './DaemonToggle';
+import { RateLimitBanner } from './RateLimitBanner';
 import { StopAllAgentsButton } from './StopAllAgentsButton';
 import { ThemeToggle } from '@stoneforge/ui';
 import { NotificationCenter } from '../notification';
@@ -532,6 +533,9 @@ export function AppShell() {
             </div>
           </div>
         </header>
+
+        {/* Rate limit banner - shown when daemon is paused due to rate limits */}
+        <RateLimitBanner />
 
         {/* Main Content */}
         {/*
