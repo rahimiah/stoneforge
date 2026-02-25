@@ -1,5 +1,15 @@
 # @stoneforge/shared-routes
 
+## 1.13.0
+
+### Patch Changes
+
+- Updated dependencies [f056e73]
+- Updated dependencies [695b3b8]
+- Updated dependencies [695b3b8]
+  - @stoneforge/core@1.13.0
+  - @stoneforge/storage@1.13.0
+
 ## 1.12.0
 
 ### Patch Changes

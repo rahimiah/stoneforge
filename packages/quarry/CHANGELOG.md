@@ -1,5 +1,37 @@
 # @stoneforge/quarry
 
+## 1.13.0
+
+### Minor Changes
+
+- a6979b2: Add autoLink and autoLinkProvider config fields to ExternalSyncConfig for automatic external issue creation on new tasks. Includes CLI commands `sf external-sync config set-auto-link <provider>` and `sf external-sync config disable-auto-link`.
+- b55db0d: Add conflict detection and resolution module for external sync. Supports configurable strategies (last_write_wins, local_wins, remote_wins, manual) with field-level merge for non-overlapping changes. Includes manual conflict resolution via sync-conflict tag and metadata storage.
+- ee163c2: Add `sf external-sync` CLI command with subcommands: config, config set-token, config set-project, link, unlink, push, pull, sync, status, and resolve. Supports --json, --quiet, and --verbose output modes.
+- e9b59ad: Add ExternalSyncConfig to quarry configuration system with enabled, pollInterval, conflictStrategy, and defaultDirection fields. Includes defaults, validation, YAML config support, tracked config, and all merge/clone/diff utilities.
+- 0db88ca: Add fetch-based GitHub REST API client for issue operations. Supports PAT authentication, rate limit handling with warnings, configurable base URL for GitHub Enterprise, and automatic pagination via Link headers.
+- 0aa8ab9: Implement GitHub ExternalProvider and TaskSyncAdapter for external sync. Adds full GitHub provider with connection testing via GET /user, GitHubTaskAdapter wrapping the API client for issue CRUD, and GitHub-specific field mapping config for priority labels, task type labels, and status/state mapping.
+- 75a0dd2: Add fetch-based Linear GraphQL API client and response types for issue operations. Supports API key authentication, rate limit handling with warnings, cursor pagination, partial GraphQL error handling, and typed error responses.
+- 91a33de: Add Linear ExternalProvider, TaskSyncAdapter, and field mapping for bidirectional task sync. Includes workflow state caching, priority mapping (Linear 0-4 to Stoneforge 1-5), status mapping via workflow state types, and placeholder provider for default registry.
+- e437527: Add provider registry for external sync providers. Includes ProviderRegistry class with register, get, list, and getAdaptersOfType operations. Ships with a placeholder GitHub provider registered by default.
+- d0775f3: Add sync engine for external service synchronization. Provides push(), pull(), and sync() operations to coordinate bidirectional sync between Stoneforge elements and external services (GitHub, Linear, etc.) with content hash change detection, configurable conflict resolution, and dry-run support.
+- f525584: Add task sync adapter utilities for converting between Stoneforge tasks and external task representations. Includes taskToExternalTask, externalTaskToTaskUpdates, label building/parsing, description hydration, and diff detection.
+
+### Patch Changes
+
+- 695b3b8: Fix tsconfig types array to use "bun" instead of "bun-types" for robust type resolution via @types/bun
+- Updated dependencies [2c06cfa]
+- Updated dependencies [e381bed]
+- Updated dependencies [18314d8]
+- Updated dependencies [e9b59ad]
+- Updated dependencies [f056e73]
+- Updated dependencies [695b3b8]
+- Updated dependencies [695b3b8]
+- Updated dependencies [695b3b8]
+  - @stoneforge/smithy@1.13.0
+  - @stoneforge/core@1.13.0
+  - @stoneforge/storage@1.13.0
+  - @stoneforge/shared-routes@1.13.0
+
 ## 1.12.0
 
 ### Minor Changes

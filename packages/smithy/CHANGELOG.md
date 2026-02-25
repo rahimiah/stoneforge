@@ -1,5 +1,37 @@
 # @stoneforge/smithy
 
+## 1.13.0
+
+### Minor Changes
+
+- 2c06cfa: Export `parseRateLimitResetTime` utility from package index for use by smithy-server daemon routes
+- e381bed: Add external sync background daemon service with polling-based automation for bidirectional sync with external services (GitHub, Linear, etc.). Includes zero-overhead guarantee for unconfigured workspaces.
+- 18314d8: Add external sync trigger and status HTTP endpoints. Provides POST endpoints for push/pull/sync operations and GET endpoints for sync status and provider listing at /api/external-sync/\*.
+- e9b59ad: Add EXTERNAL_SYNC to settings service with ExternalSyncSettings interface, ProviderConfig type, and helper methods for managing external sync provider configurations and sync cursors.
+
+### Patch Changes
+
+- 695b3b8: Fix tsconfig types array to use "bun" instead of "bun-types" for robust type resolution via @types/bun
+- Updated dependencies [a6979b2]
+- Updated dependencies [b55db0d]
+- Updated dependencies [ee163c2]
+- Updated dependencies [e9b59ad]
+- Updated dependencies [f056e73]
+- Updated dependencies [695b3b8]
+- Updated dependencies [695b3b8]
+- Updated dependencies [695b3b8]
+- Updated dependencies [0db88ca]
+- Updated dependencies [0aa8ab9]
+- Updated dependencies [75a0dd2]
+- Updated dependencies [91a33de]
+- Updated dependencies [e437527]
+- Updated dependencies [d0775f3]
+- Updated dependencies [f525584]
+  - @stoneforge/quarry@1.13.0
+  - @stoneforge/core@1.13.0
+  - @stoneforge/storage@1.13.0
+  - @stoneforge/shared-routes@1.13.0
+
 ## 1.12.0
 
 ### Minor Changes
