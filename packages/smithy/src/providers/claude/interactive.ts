@@ -130,7 +130,13 @@ export class ClaudeInteractiveProvider implements InteractiveProvider {
     };
     if (options.stoneforgeRoot) {
       env.STONEFORGE_ROOT = options.stoneforgeRoot;
+      // Prepend the sf CLI binary directory to PATH so agents can run `sf` commands
+      const sfBinDir = options.stoneforgeRoot + '/packages/smithy/dist/bin';
+      env.PATH = sfBinDir + ':' + (env.PATH ?? '');
     }
+    // Remove CLAUDECODE to prevent "cannot be launched inside another Claude Code
+    // session" error when the Stoneforge server itself runs inside Claude Code.
+    delete env.CLAUDECODE;
 
     const cols = options.cols ?? 120;
     const rows = options.rows ?? 30;
