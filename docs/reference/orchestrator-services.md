@@ -1408,3 +1408,757 @@ class GitLabMergeProvider implements MergeRequestProvider {
 }
 ```
 
+---
+
+## SettingsService
+
+**File:** `services/settings-service.ts`
+
+Server-side key-value settings persisted to SQLite. Used for workspace-wide configuration that needs to be accessible server-side, such as default executable paths for agent providers, external sync provider credentials, and sync cursor storage.
+
+Settings are stored in the `settings` table as JSON-encoded values. The service provides generic CRUD operations for arbitrary keys, plus convenience methods for well-known setting groups (agent defaults, external sync).
+
+```typescript
+import { createSettingsService } from '@stoneforge/smithy';
+
+const settingsService = createSettingsService(storage);
+```
+
+### Interface
+
+```typescript
+interface SettingsService {
+  getSetting(key: string): Setting | undefined;
+  setSetting(key: string, value: unknown): Setting;
+  deleteSetting(key: string): boolean;
+  getAgentDefaults(): ServerAgentDefaults;
+  setAgentDefaults(defaults: ServerAgentDefaults): ServerAgentDefaults;
+  getExternalSyncSettings(): ExternalSyncSettings;
+  setExternalSyncSettings(settings: ExternalSyncSettings): ExternalSyncSettings;
+  getProviderConfig(provider: string): ProviderConfig | undefined;
+  setProviderConfig(provider: string, config: ProviderConfig): ProviderConfig;
+}
+```
+
+### Generic Settings CRUD
+
+```typescript
+// Get a setting by key (returns undefined if not found)
+const setting = settingsService.getSetting('myKey');
+// setting: { key: string, value: unknown, updatedAt: string } | undefined
+
+// Set a setting (upsert — inserts or updates)
+const saved = settingsService.setSetting('myKey', { foo: 'bar' });
+
+// Delete a setting (returns true if it existed)
+const deleted = settingsService.deleteSetting('myKey');
+```
+
+### Agent Defaults
+
+Manage default executable paths and fallback chains for agent providers.
+
+```typescript
+// Get agent defaults (returns default empty config if not set)
+const defaults = settingsService.getAgentDefaults();
+// defaults: { defaultExecutablePaths: Record<string, string>, fallbackChain?: string[] }
+
+// Set agent defaults
+settingsService.setAgentDefaults({
+  defaultExecutablePaths: {
+    'claude-code': '/usr/local/bin/claude',
+    'opencode': '/usr/local/bin/opencode',
+  },
+  fallbackChain: ['claude', 'opencode-claude', 'opencode-gemini'],
+});
+```
+
+### External Sync Settings
+
+Manage external sync provider configurations, sync cursors, and polling settings. Tokens are stored in SQLite (not git-tracked) for security.
+
+```typescript
+// Get external sync settings (returns defaults if not configured)
+const syncSettings = settingsService.getExternalSyncSettings();
+// syncSettings: {
+//   providers: Record<string, ProviderConfig>,
+//   syncCursors: Record<string, string>,
+//   pollIntervalMs: number,        // default: 60000
+//   defaultDirection: SyncDirection // default: 'bidirectional'
+// }
+
+// Set external sync settings
+settingsService.setExternalSyncSettings({
+  providers: { github: { provider: 'github', token: 'ghp_...' } },
+  syncCursors: {},
+  pollIntervalMs: 30000,
+  defaultDirection: 'bidirectional',
+});
+
+// Get a specific provider's config
+const github = settingsService.getProviderConfig('github');
+// github: { provider: string, token?: string, apiBaseUrl?: string, defaultProject?: string } | undefined
+
+// Set a specific provider's config (updates within the sync settings)
+settingsService.setProviderConfig('linear', {
+  provider: 'linear',
+  token: 'lin_api_...',
+  defaultProject: 'my-team',
+});
+```
+
+### Types
+
+```typescript
+interface Setting {
+  key: string;
+  value: unknown;
+  updatedAt: string;
+}
+
+interface ServerAgentDefaults {
+  /** Provider name → executable path (e.g. { claude: '/usr/local/bin/claude-dev' }) */
+  defaultExecutablePaths: Record<string, string>;
+  /** Ordered list of executable names/paths for rate limit fallback */
+  fallbackChain?: string[];
+}
+
+type SyncDirection = 'push' | 'pull' | 'bidirectional';
+
+interface ProviderConfig {
+  provider: string;
+  token?: string;
+  apiBaseUrl?: string;
+  defaultProject?: string;
+}
+
+interface ExternalSyncSettings {
+  providers: Record<string, ProviderConfig>;
+  syncCursors: Record<string, string>;
+  pollIntervalMs: number;
+  defaultDirection: SyncDirection;
+}
+```
+
+### Well-Known Setting Keys
+
+```typescript
+const SETTING_KEYS = {
+  AGENT_DEFAULTS: 'agentDefaults',
+  RATE_LIMITS: 'rateLimits',
+  EXTERNAL_SYNC: 'externalSync',
+} as const;
+```
+
+### Related Services
+
+- **RateLimitTracker** — uses `SettingsService` for persistence (key: `rateLimits`)
+- **ExternalSyncDaemon** — reads provider tokens and poll intervals from `SettingsService`
+- **DispatchDaemon** — reads agent defaults for executable fallback chains
+
+---
+
+## MetricsService
+
+**File:** `services/metrics-service.ts`
+
+Records and aggregates provider metrics for LLM usage tracking. Stores data in the `provider_metrics` SQLite table and provides aggregation queries for dashboards and CLI reporting.
+
+The service tracks per-session usage data including token counts, duration, and outcome (completed, failed, rate-limited, or handoff). Aggregation methods support grouping by provider or model, with configurable time ranges for trend analysis.
+
+```typescript
+import { createMetricsService } from '@stoneforge/smithy';
+
+const metricsService = createMetricsService(storage);
+```
+
+### Interface
+
+```typescript
+interface MetricsService {
+  record(input: RecordMetricInput): void;
+  aggregateByProvider(timeRange: TimeRange): AggregatedMetrics[];
+  aggregateByModel(timeRange: TimeRange): AggregatedMetrics[];
+  getTimeSeries(timeRange: TimeRange, groupBy: 'provider' | 'model'): TimeSeriesPoint[];
+}
+```
+
+### Recording Metrics
+
+```typescript
+// Record a metric entry for an LLM session
+metricsService.record({
+  provider: 'claude-code',
+  model: 'claude-sonnet-4-20250514',
+  sessionId: 'session-abc123',
+  taskId: 'el-1234',              // optional
+  inputTokens: 15000,
+  outputTokens: 3200,
+  durationMs: 45000,
+  outcome: 'completed',           // 'completed' | 'failed' | 'rate_limited' | 'handoff'
+});
+```
+
+### Aggregation Queries
+
+```typescript
+// Aggregate by provider over the last 7 days
+const byProvider = metricsService.aggregateByProvider({ days: 7 });
+// Returns: AggregatedMetrics[] — one entry per provider, sorted by total tokens descending
+
+// Aggregate by model over the last 30 days
+const byModel = metricsService.aggregateByModel({ days: 30 });
+// Each entry includes: group, totalInputTokens, totalOutputTokens, totalTokens,
+//   sessionCount, avgDurationMs, errorRate, failedCount, rateLimitedCount
+```
+
+### Time Series
+
+```typescript
+// Get daily time-series data grouped by provider
+const series = metricsService.getTimeSeries({ days: 7 }, 'provider');
+// Returns: TimeSeriesPoint[] — one entry per (bucket, group) pair
+
+// Get weekly time-series data grouped by model (for ranges > 30 days)
+const weeklySeries = metricsService.getTimeSeries({ days: 90 }, 'model');
+```
+
+**Time bucket sizing:**
+- ≤ 30 days → daily buckets
+- \> 30 days → weekly buckets
+
+### Types
+
+```typescript
+type MetricOutcome = 'completed' | 'failed' | 'rate_limited' | 'handoff';
+
+interface RecordMetricInput {
+  provider: string;
+  model?: string;
+  sessionId: string;
+  taskId?: string;
+  inputTokens: number;
+  outputTokens: number;
+  durationMs: number;
+  outcome: MetricOutcome;
+}
+
+interface TimeRange {
+  /** Number of days to look back (e.g., 7, 14, 30) */
+  days: number;
+}
+
+interface AggregatedMetrics {
+  group: string;                // Provider name or model name
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalTokens: number;          // input + output
+  sessionCount: number;
+  avgDurationMs: number;
+  errorRate: number;            // 0-1 (failed / total)
+  failedCount: number;
+  rateLimitedCount: number;
+}
+
+interface TimeSeriesPoint {
+  bucket: string;               // ISO 8601 date string
+  group: string;                // Provider or model name
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  sessionCount: number;
+  avgDurationMs: number;
+}
+```
+
+### Related Services
+
+- **DispatchDaemon** — records metrics at session completion
+- **RateLimitTracker** — rate-limited outcomes are tracked via `outcome: 'rate_limited'`
+
+---
+
+## OperationLogService
+
+**File:** `services/operation-log-service.ts`
+
+Provides persistent, queryable operation logs for observability. Writes structured log entries to the `operation_log` SQLite table so that events survive session restarts and can be queried later via the CLI or dashboard.
+
+Unlike application-level logging (which goes to stdout/files), the operation log captures discrete orchestration events — task dispatches, merge outcomes, session failures, rate limit detections — in a structured format suitable for querying and auditing.
+
+```typescript
+import { createOperationLogService } from '@stoneforge/smithy';
+
+const operationLog = createOperationLogService(storage);
+```
+
+### Interface
+
+```typescript
+interface OperationLogService {
+  write(
+    level: OperationLogLevel,
+    category: OperationLogCategory,
+    message: string,
+    details?: { agentId?: string; taskId?: string } & Record<string, unknown>
+  ): void;
+
+  query(filters?: OperationLogFilter): OperationLogEntry[];
+}
+```
+
+### Writing Log Entries
+
+```typescript
+// Log a dispatch event
+operationLog.write('info', 'dispatch', 'Task dispatched to worker', {
+  agentId: 'el-abc1',
+  taskId: 'el-1234',
+  branch: 'agent/worker-1/el-1234-implement-feature',
+});
+
+// Log a merge failure
+operationLog.write('error', 'merge', 'Merge conflict detected', {
+  taskId: 'el-5678',
+  conflictFiles: ['src/index.ts', 'src/config.ts'],
+});
+
+// Log a rate limit event
+operationLog.write('warn', 'rate-limit', 'Executable rate-limited', {
+  agentId: 'el-abc1',
+  executable: 'claude',
+  resetsAt: '2026-02-25T12:00:00.000Z',
+});
+```
+
+The `agentId` and `taskId` fields from `details` are extracted into dedicated columns for efficient filtering. Remaining details are stored as JSON.
+
+### Querying Log Entries
+
+```typescript
+// Get recent entries (default limit: 20, newest first)
+const recent = operationLog.query();
+
+// Filter by category
+const mergeEvents = operationLog.query({ category: 'merge' });
+
+// Filter by level and time range
+const errors = operationLog.query({
+  level: 'error',
+  since: '2026-02-24T00:00:00.000Z',
+  limit: 50,
+});
+
+// Filter by task or agent
+const taskLogs = operationLog.query({ taskId: 'el-1234' });
+const agentLogs = operationLog.query({ agentId: 'el-abc1' });
+
+// Combine filters
+const recentDispatchErrors = operationLog.query({
+  level: 'error',
+  category: 'dispatch',
+  since: '2026-02-25T00:00:00.000Z',
+  limit: 10,
+});
+```
+
+### Types
+
+```typescript
+const OperationLogLevel = {
+  INFO: 'info',
+  WARN: 'warn',
+  ERROR: 'error',
+} as const;
+
+type OperationLogLevel = 'info' | 'warn' | 'error';
+
+const OperationLogCategory = {
+  DISPATCH: 'dispatch',
+  MERGE: 'merge',
+  SESSION: 'session',
+  RATE_LIMIT: 'rate-limit',
+  STEWARD: 'steward',
+  RECOVERY: 'recovery',
+} as const;
+
+type OperationLogCategory = 'dispatch' | 'merge' | 'session' | 'rate-limit' | 'steward' | 'recovery';
+
+interface OperationLogEntry {
+  readonly id: string;
+  readonly timestamp: string;
+  readonly level: OperationLogLevel;
+  readonly category: OperationLogCategory;
+  readonly agentId?: string;
+  readonly taskId?: string;
+  readonly message: string;
+  readonly details?: Record<string, unknown>;
+}
+
+interface OperationLogFilter {
+  readonly level?: OperationLogLevel;
+  readonly category?: OperationLogCategory;
+  readonly since?: string;             // ISO timestamp
+  readonly taskId?: string;
+  readonly agentId?: string;
+  readonly limit?: number;             // default: 20
+}
+```
+
+### Log Categories
+
+| Category | Description | Example Events |
+|----------|-------------|----------------|
+| `dispatch` | Task dispatch events | Task assigned to worker, poll errors |
+| `merge` | Merge operations | Test results, merge outcomes, conflicts |
+| `session` | Session lifecycle | Session spawn, terminate, failure |
+| `rate-limit` | Rate limit tracking | Rate limit detection, recovery |
+| `steward` | Steward execution | Steward triggered, execution results |
+| `recovery` | Orphan recovery | Orphaned task detected, recovery attempt |
+
+### Related Services
+
+- **DispatchDaemon** — writes dispatch, session, and recovery logs
+- **MergeStewardService** — writes merge logs
+- **RateLimitTracker** — rate limit events are logged by consumers
+
+---
+
+## RateLimitTracker
+
+**File:** `services/rate-limit-tracker.ts`
+
+Tracks which agent executables are rate-limited and when their limits reset. Used by the dispatch system to avoid spawning sessions against rate-limited executables and to select fallback executables when the primary is throttled.
+
+The tracker maintains an in-memory map of rate-limited executables with their reset times. Stale entries (past reset time) are lazily cleaned up during read operations. When a `SettingsService` is provided, the tracker persists its state to SQLite (key: `rateLimits`) and hydrates from it on creation, surviving server restarts.
+
+```typescript
+import { createRateLimitTracker } from '@stoneforge/smithy';
+
+// In-memory only (state lost on restart)
+const tracker = createRateLimitTracker();
+
+// With persistence via SettingsService
+const tracker = createRateLimitTracker(settingsService);
+```
+
+### Interface
+
+```typescript
+interface RateLimitTracker {
+  markLimited(executable: string, resetsAt: Date): void;
+  isLimited(executable: string): boolean;
+  getAvailableExecutable(fallbackChain: string[]): string | undefined;
+  getSoonestResetTime(): Date | undefined;
+  getAllLimits(): RateLimitEntry[];
+  isAllLimited(fallbackChain: string[]): boolean;
+  clear(): void;
+}
+```
+
+### Marking Rate Limits
+
+```typescript
+// Mark an executable as rate-limited until a reset time
+tracker.markLimited('claude', new Date('2026-02-25T12:30:00.000Z'));
+
+// If already tracked, only updates if new resetsAt is later (never downgrades)
+tracker.markLimited('claude', new Date('2026-02-25T12:00:00.000Z'));
+// ^ No effect — existing reset time is later
+```
+
+### Checking Rate Limits
+
+```typescript
+// Check if an executable is currently limited (auto-expires stale entries)
+const limited = tracker.isLimited('claude');
+
+// Check if all executables in a fallback chain are limited
+const allLimited = tracker.isAllLimited(['claude', 'opencode-claude', 'opencode-gemini']);
+// Returns false if the chain is empty
+```
+
+### Fallback Chain Selection
+
+```typescript
+// Walk the fallback chain and return the first non-limited executable
+const available = tracker.getAvailableExecutable([
+  'claude',            // primary — rate-limited
+  'opencode-claude',   // fallback 1 — rate-limited
+  'opencode-gemini',   // fallback 2 — available ✓
+]);
+// Returns 'opencode-gemini' (or undefined if all are limited)
+```
+
+### Querying State
+
+```typescript
+// Get the earliest reset time among all limited executables
+const soonest = tracker.getSoonestResetTime();
+// Returns Date | undefined — useful for scheduling retry timers
+
+// Get all currently-limited entries (auto-expires stale entries first)
+const limits = tracker.getAllLimits();
+// limits: RateLimitEntry[] — each with { executable, resetsAt, recordedAt }
+```
+
+### Clearing State
+
+```typescript
+// Reset all tracked state (also clears persisted state if SettingsService is provided)
+tracker.clear();
+```
+
+### Types
+
+```typescript
+interface RateLimitEntry {
+  executable: string;
+  resetsAt: Date;
+  recordedAt: Date;
+}
+```
+
+### Persistence
+
+When created with a `SettingsService`, the tracker:
+
+1. **Hydrates** on creation — reads persisted rate limits from SQLite (key: `rateLimits`), skipping expired entries
+2. **Persists** on every `markLimited()` and `clear()` call — writes active entries to SQLite
+3. **Auto-expires** stale entries before persisting to avoid writing dead data
+
+```typescript
+// Persisted state shape (in settings table)
+// key: 'rateLimits'
+// value: Record<string, { resetsAt: string, recordedAt: string }>
+```
+
+### Related Services
+
+- **SettingsService** — provides persistence layer (optional)
+- **DispatchDaemon** — checks rate limits before spawning sessions
+- **StewardScheduler** — uses tracker to skip steward execution when all executables are limited
+- **OperationLogService** — rate limit events are logged by consumers
+
+---
+
+## AgentRegistry
+
+**File:** `services/agent-registry.ts`
+
+Manages agent registration, querying, session tracking, and channel operations for the orchestration system. Agents are stored as `Entity` elements with specialized metadata in their `metadata.agent` field, using the `QuarryAPI` for all storage operations.
+
+Each agent is created with a dedicated direct channel for receiving messages. The registry handles the full lifecycle — registration (with rollback on partial failure), querying by role/status/filters, session management, metadata updates, and deletion (including channel cleanup).
+
+```typescript
+import { createAgentRegistry } from '@stoneforge/smithy';
+
+const registry = createAgentRegistry(api);
+```
+
+### Interface
+
+```typescript
+interface AgentRegistry {
+  // Registration
+  registerAgent(input: RegisterAgentInput): Promise<AgentEntity>;
+  registerDirector(input: RegisterDirectorInput): Promise<AgentEntity>;
+  registerWorker(input: RegisterWorkerInput): Promise<AgentEntity>;
+  registerSteward(input: RegisterStewardInput): Promise<AgentEntity>;
+
+  // Queries
+  getAgent(entityId: EntityId): Promise<AgentEntity | undefined>;
+  getAgentByName(name: string): Promise<AgentEntity | undefined>;
+  listAgents(filter?: AgentFilter): Promise<AgentEntity[]>;
+  getAgentsByRole(role: AgentRole): Promise<AgentEntity[]>;
+  getAvailableWorkers(): Promise<AgentEntity[]>;
+  getStewards(): Promise<AgentEntity[]>;
+  getDirector(): Promise<AgentEntity | undefined>;
+
+  // Session Management
+  updateAgentSession(
+    entityId: EntityId,
+    sessionId: string | undefined,
+    status: 'idle' | 'running' | 'suspended' | 'terminated'
+  ): Promise<AgentEntity>;
+  updateAgentMetadata(entityId: EntityId, updates: Partial<AgentMetadata>): Promise<AgentEntity>;
+  updateAgent(entityId: EntityId, updates: { name?: string }): Promise<AgentEntity>;
+  deleteAgent(entityId: EntityId): Promise<void>;
+
+  // Channel Operations
+  getAgentChannel(agentId: EntityId): Promise<Channel | undefined>;
+  getAgentChannelId(agentId: EntityId): Promise<ChannelId | undefined>;
+}
+```
+
+### Agent Registration
+
+```typescript
+// Register using the generic method (dispatches by role)
+const agent = await registry.registerAgent({
+  role: 'worker',
+  name: 'worker-alice',
+  workerMode: 'ephemeral',
+  createdBy: humanEntityId,
+  reportsTo: directorEntityId,
+  tags: ['frontend'],
+});
+
+// Register a director (typically one per workspace)
+const director = await registry.registerDirector({
+  name: 'director-main',
+  createdBy: humanEntityId,
+  maxConcurrentTasks: 5,
+  provider: 'claude-code',
+  model: 'claude-sonnet-4-20250514',
+});
+
+// Register a worker
+const worker = await registry.registerWorker({
+  name: 'worker-bob',
+  workerMode: 'ephemeral',
+  createdBy: humanEntityId,
+  reportsTo: directorEntityId,
+  provider: 'claude-code',
+  executablePath: '/usr/local/bin/claude',
+});
+
+// Register a steward
+const steward = await registry.registerSteward({
+  name: 'merge-steward',
+  stewardFocus: 'merge',
+  triggers: [{ type: 'event', event: 'task_completed' }],
+  createdBy: humanEntityId,
+  reportsTo: directorEntityId,
+});
+```
+
+Agent names must be unique — registering a duplicate name throws an error. Registration creates a dedicated direct channel for the agent and stores the channel ID in the agent's metadata. If channel creation or metadata update fails, the operation rolls back (deletes any partially created resources).
+
+### Agent Queries
+
+```typescript
+// Get by ID
+const agent = await registry.getAgent(entityId);
+
+// Get by name
+const agent = await registry.getAgentByName('worker-alice');
+
+// List all agents (optionally filtered)
+const all = await registry.listAgents();
+const workers = await registry.listAgents({ role: 'worker' });
+const ephemeral = await registry.listAgents({ role: 'worker', workerMode: 'ephemeral' });
+const mergeStewards = await registry.listAgents({ role: 'steward', stewardFocus: 'merge' });
+const running = await registry.listAgents({ sessionStatus: 'running' });
+const withSessions = await registry.listAgents({ hasSession: true });
+const reporting = await registry.listAgents({ reportsTo: directorEntityId });
+
+// Convenience methods
+const allWorkers = await registry.getAgentsByRole('worker');
+const available = await registry.getAvailableWorkers();  // idle workers
+const stewards = await registry.getStewards();
+const director = await registry.getDirector();           // first director found
+```
+
+### Session Management
+
+```typescript
+// Update session status (e.g., when spawning or terminating)
+await registry.updateAgentSession(entityId, 'session-abc123', 'running');
+await registry.updateAgentSession(entityId, undefined, 'idle');
+
+// Update agent metadata (merged with existing)
+await registry.updateAgentMetadata(entityId, {
+  sessionStatus: 'running',
+  worktree: '.stoneforge/.worktrees/worker-1-task-abc',
+});
+
+// Update agent properties
+await registry.updateAgent(entityId, { name: 'worker-alice-renamed' });
+
+// Delete agent (also deletes associated channel, best-effort)
+await registry.deleteAgent(entityId);
+```
+
+### Channel Operations
+
+Each agent has a dedicated direct channel for receiving dispatch notifications and messages.
+
+```typescript
+// Get the full channel object for an agent
+const channel = await registry.getAgentChannel(agentId);
+// First checks metadata for channelId (fast path), then falls back to channel search
+
+// Get just the channel ID (faster — no channel fetch)
+const channelId = await registry.getAgentChannelId(agentId);
+```
+
+### Registration Input Types
+
+```typescript
+interface RegisterDirectorInput {
+  readonly name: string;
+  readonly tags?: string[];
+  readonly createdBy: EntityId;
+  readonly maxConcurrentTasks?: number;
+  readonly roleDefinitionRef?: ElementId;
+  readonly provider?: string;
+  readonly model?: string;
+  readonly executablePath?: string;
+}
+
+interface RegisterWorkerInput {
+  readonly name: string;
+  readonly workerMode: WorkerMode;         // 'ephemeral' | 'persistent'
+  readonly tags?: string[];
+  readonly createdBy: EntityId;
+  readonly reportsTo?: EntityId;
+  readonly maxConcurrentTasks?: number;
+  readonly roleDefinitionRef?: ElementId;
+  readonly provider?: string;
+  readonly model?: string;
+  readonly executablePath?: string;
+}
+
+interface RegisterStewardInput {
+  readonly name: string;
+  readonly stewardFocus: StewardFocus;     // 'merge' | 'docs' | 'recovery' | 'custom'
+  readonly triggers?: StewardTrigger[];
+  readonly playbook?: string;              // deprecated — prefer playbookId
+  readonly playbookId?: string;
+  readonly tags?: string[];
+  readonly createdBy: EntityId;
+  readonly reportsTo?: EntityId;
+  readonly maxConcurrentTasks?: number;
+  readonly roleDefinitionRef?: ElementId;
+  readonly provider?: string;
+  readonly model?: string;
+  readonly executablePath?: string;
+}
+
+type RegisterAgentInput =
+  | (RegisterDirectorInput & { role: 'director' })
+  | (RegisterWorkerInput & { role: 'worker' })
+  | (RegisterStewardInput & { role: 'steward' });
+```
+
+### Filter Type
+
+```typescript
+interface AgentFilter {
+  readonly role?: AgentRole;
+  readonly workerMode?: WorkerMode;
+  readonly stewardFocus?: StewardFocus;
+  readonly sessionStatus?: 'idle' | 'running' | 'suspended' | 'terminated';
+  readonly reportsTo?: EntityId;
+  readonly hasSession?: boolean;
+}
+```
+
+### Related Services
+
+- **DispatchDaemon** — queries available workers and dispatches tasks via the registry
+- **DispatchService** — uses the registry to look up agents and their channels
+- **TaskAssignmentService** — references agents by ID for task assignment
+- **StewardScheduler** — registers and queries stewards from the registry
+- **AgentPoolService** — tracks pool membership using agent IDs from the registry
+
