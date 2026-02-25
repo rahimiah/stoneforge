@@ -17,6 +17,7 @@ const OPENVSX_BASE_URL = 'https://open-vsx.org';
 /** Timeouts in milliseconds */
 const SEARCH_METADATA_TIMEOUT = 10_000; // 10 seconds for search/metadata
 const DOWNLOAD_TIMEOUT = 60_000; // 60 seconds for VSIX download
+const TRUSTED_DOWNLOAD_HOSTS = new Set(['open-vsx.org', 'www.open-vsx.org']);
 
 /**
  * Helper to create an AbortSignal with timeout
@@ -44,6 +45,15 @@ function handleFetchError(error: unknown, operation: string): Response {
     { error: { code: 'UPSTREAM_ERROR', message: `Failed to ${operation}: ${message}` } },
     { status: 502 }
   );
+}
+
+function isTrustedDownloadUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' && TRUSTED_DOWNLOAD_HOSTS.has(parsed.hostname);
+  } catch {
+    return false;
+  }
 }
 
 export function createExtensionsRoutes() {
@@ -202,6 +212,14 @@ export function createExtensionsRoutes() {
         return c.json(
           { error: { code: 'NO_DOWNLOAD_URL', message: 'Extension metadata does not contain a download URL' } },
           404
+        );
+      }
+
+      if (!isTrustedDownloadUrl(downloadUrl)) {
+        logger.error(`Rejected untrusted VSIX download URL: ${downloadUrl}`);
+        return c.json(
+          { error: { code: 'UNTRUSTED_DOWNLOAD_URL', message: 'Extension download URL is not trusted' } },
+          502
         );
       }
 

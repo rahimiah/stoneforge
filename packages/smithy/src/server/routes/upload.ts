@@ -12,6 +12,7 @@ import { UPLOAD_DIR } from '../config.js';
 import { createLogger } from '../../utils/logger.js';
 
 const logger = createLogger('orchestrator');
+const MAX_UPLOAD_SIZE = 10 * 1024 * 1024;
 
 export function createUploadRoutes() {
   const app = new Hono();
@@ -31,6 +32,12 @@ export function createUploadRoutes() {
       }
 
       const buffer = Buffer.from(body.data, 'base64');
+      if (buffer.length > MAX_UPLOAD_SIZE) {
+        return c.json(
+          { error: { code: 'FILE_TOO_LARGE', message: `File exceeds maximum size of ${MAX_UPLOAD_SIZE} bytes` } },
+          413
+        );
+      }
       const originalName = body.filename || `file-${timestamp}`;
 
       const ext = extname(originalName);

@@ -5,7 +5,7 @@
  * Spawns language servers on demand and manages their lifecycle.
  */
 
-import { spawn, execSync, type ChildProcess } from 'node:child_process';
+import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createLogger } from '../../utils/logger.js';
@@ -58,7 +58,7 @@ interface RunningServer {
  */
 async function commandExists(cmd: string): Promise<boolean> {
   try {
-    execSync(`which ${cmd}`, { encoding: 'utf-8', timeout: 5000, stdio: 'pipe' });
+    execFileSync('which', [cmd], { encoding: 'utf-8', timeout: 5000, stdio: 'pipe' });
     return true;
   } catch {
     return false;

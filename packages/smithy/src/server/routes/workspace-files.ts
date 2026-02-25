@@ -5,8 +5,8 @@
  * Replaces browser's File System Access API for cross-browser compatibility.
  */
 
-import { resolve, relative, join, normalize, dirname } from 'node:path';
-import { readdir, readFile, writeFile, stat, mkdir, unlink, rename as fsRename, rm } from 'node:fs/promises';
+import { resolve, relative, join, normalize, dirname, isAbsolute } from 'node:path';
+import { readdir, readFile, writeFile, stat, mkdir, unlink, rename as fsRename, rm, realpath } from 'node:fs/promises';
 import { Hono } from 'hono';
 import { PROJECT_ROOT } from '../config.js';
 import { createLogger } from '../../utils/logger.js';
@@ -112,6 +112,91 @@ function validatePath(relativePath: string, workspaceRoot: string): string | nul
   }
 
   return absolutePath;
+}
+
+function isPathWithinRoot(rootPath: string, targetPath: string): boolean {
+  const rel = relative(rootPath, targetPath);
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+
+async function resolveExistingAncestorPath(path: string): Promise<string | null> {
+  let current = path;
+  while (true) {
+    try {
+      const currentStat = await stat(current);
+      if (currentStat) {
+        return current;
+      }
+    } catch {
+      // keep walking up until we find an existing ancestor
+    }
+
+    const parent = dirname(current);
+    if (parent === current) {
+      return null;
+    }
+    current = parent;
+  }
+}
+
+/**
+ * Validates a path for existing targets (read/delete/rename source).
+ * Uses realpath to prevent symlink escape from workspace root.
+ */
+async function validateExistingPath(
+  relativePath: string,
+  workspaceRoot: string,
+  workspaceRootRealPath: string
+): Promise<string | null> {
+  const candidate = validatePath(relativePath, workspaceRoot);
+  if (!candidate) return null;
+
+  try {
+    const resolved = await realpath(candidate);
+    if (!isPathWithinRoot(workspaceRootRealPath, resolved)) {
+      return null;
+    }
+    return resolved;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Validates a path for writes/creates where the target may not yet exist.
+ * Resolves the nearest existing ancestor and ensures it stays inside workspace root.
+ */
+async function validatePathForWrite(
+  relativePath: string,
+  workspaceRoot: string,
+  workspaceRootRealPath: string
+): Promise<string | null> {
+  const candidate = validatePath(relativePath, workspaceRoot);
+  if (!candidate) return null;
+
+  const existingAncestor = await resolveExistingAncestorPath(candidate);
+  if (!existingAncestor) return null;
+
+  try {
+    const ancestorRealPath = await realpath(existingAncestor);
+    if (!isPathWithinRoot(workspaceRootRealPath, ancestorRealPath)) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
+  // If target already exists, it must also resolve within workspace root.
+  try {
+    const targetRealPath = await realpath(candidate);
+    if (!isPathWithinRoot(workspaceRootRealPath, targetRealPath)) {
+      return null;
+    }
+  } catch {
+    // target may not exist yet
+  }
+
+  return candidate;
 }
 
 /**
@@ -354,6 +439,7 @@ async function searchFileContents(
 export function createWorkspaceFilesRoutes() {
   const app = new Hono();
   const workspaceRoot = PROJECT_ROOT;
+  const workspaceRootRealPathPromise = realpath(workspaceRoot);
 
   // GET /api/workspace/tree - Returns recursive directory tree
   app.get('/api/workspace/tree', async (c) => {
@@ -368,7 +454,8 @@ export function createWorkspaceFilesRoutes() {
       }
 
       // Validate root path
-      const validatedRoot = validatePath(root, workspaceRoot);
+      const workspaceRootRealPath = await workspaceRootRealPathPromise;
+      const validatedRoot = await validateExistingPath(root, workspaceRoot, workspaceRootRealPath);
       if (!validatedRoot) {
         return c.json({ error: { code: 'INVALID_PATH', message: 'Path is outside workspace' } }, 400);
       }
@@ -402,7 +489,8 @@ export function createWorkspaceFilesRoutes() {
       }
 
       // Validate path
-      const validatedPath = validatePath(path, workspaceRoot);
+      const workspaceRootRealPath = await workspaceRootRealPathPromise;
+      const validatedPath = await validateExistingPath(path, workspaceRoot, workspaceRootRealPath);
       if (!validatedPath) {
         return c.json({ error: { code: 'INVALID_PATH', message: 'Path is outside workspace' } }, 400);
       }
@@ -455,7 +543,8 @@ export function createWorkspaceFilesRoutes() {
       }
 
       // Validate path
-      const validatedPath = validatePath(body.path, workspaceRoot);
+      const workspaceRootRealPath = await workspaceRootRealPathPromise;
+      const validatedPath = await validatePathForWrite(body.path, workspaceRoot, workspaceRootRealPath);
       if (!validatedPath) {
         return c.json({ error: { code: 'INVALID_PATH', message: 'Path is outside workspace' } }, 400);
       }
@@ -491,7 +580,8 @@ export function createWorkspaceFilesRoutes() {
       }
 
       // Validate path
-      const validatedPath = validatePath(path, workspaceRoot);
+      const workspaceRootRealPath = await workspaceRootRealPathPromise;
+      const validatedPath = await validateExistingPath(path, workspaceRoot, workspaceRootRealPath);
       if (!validatedPath) {
         return c.json({ error: { code: 'INVALID_PATH', message: 'Path is outside workspace' } }, 400);
       }
@@ -535,13 +625,14 @@ export function createWorkspaceFilesRoutes() {
       }
 
       // Validate old path
-      const validatedOldPath = validatePath(body.oldPath, workspaceRoot);
+      const workspaceRootRealPath = await workspaceRootRealPathPromise;
+      const validatedOldPath = await validateExistingPath(body.oldPath, workspaceRoot, workspaceRootRealPath);
       if (!validatedOldPath) {
         return c.json({ error: { code: 'INVALID_PATH', message: 'oldPath is outside workspace' } }, 400);
       }
 
       // Validate new path
-      const validatedNewPath = validatePath(body.newPath, workspaceRoot);
+      const validatedNewPath = await validatePathForWrite(body.newPath, workspaceRoot, workspaceRootRealPath);
       if (!validatedNewPath) {
         return c.json({ error: { code: 'INVALID_PATH', message: 'newPath is outside workspace' } }, 400);
       }
@@ -589,7 +680,8 @@ export function createWorkspaceFilesRoutes() {
       }
 
       // Validate path
-      const validatedPath = validatePath(body.path, workspaceRoot);
+      const workspaceRootRealPath = await workspaceRootRealPathPromise;
+      const validatedPath = await validatePathForWrite(body.path, workspaceRoot, workspaceRootRealPath);
       if (!validatedPath) {
         return c.json({ error: { code: 'INVALID_PATH', message: 'Path is outside workspace' } }, 400);
       }
