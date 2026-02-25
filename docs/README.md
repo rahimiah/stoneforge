@@ -157,6 +157,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for full architecture details.
 | CLI completion | `cli/completion.ts` | - |
 | CLI commands | `cli/commands/*.ts` | `cli/commands/*.bun.test.ts` |
 | CLI embeddings commands | `cli/commands/embeddings.ts` | - |
+| CLI external-sync commands | `cli/commands/external-sync.ts` | - |
 | CLI database helpers | `cli/db.ts` | - |
 | CLI command suggest | `cli/suggest.ts` | - |
 | CLI types | `cli/types.ts` | - |
@@ -324,6 +325,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for full architecture details.
 | Metrics service | `services/metrics-service.ts` | `services/metrics-service.bun.test.ts` |
 | Operation log service | `services/operation-log-service.ts` | `services/operation-log-service.bun.test.ts` |
 | Rate limit tracker | `services/rate-limit-tracker.ts` | `services/rate-limit-tracker.bun.test.ts` |
+| External sync daemon | `services/external-sync-daemon.ts` | - |
 | **Runtime** | | |
 | Spawner service | `runtime/spawner.ts` | `runtime/spawner.bun.test.ts` |
 | Session manager | `runtime/session-manager.ts` | `runtime/session-manager.bun.test.ts` |
@@ -379,6 +381,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for full architecture details.
 | Route: workspace-files | `server/routes/workspace-files.ts` | - |
 | Route: diagnostics | `server/routes/diagnostics.ts` | - |
 | Route: metrics | `server/routes/metrics.ts` | - |
+| Route: external-sync | `server/routes/external-sync.ts` | - |
+| Route: external-sync helpers | `server/routes/external-sync-helpers.ts` | - |
 | LSP manager service | `server/services/lsp-manager.ts` | - |
 | Session messages service | `server/services/session-messages.ts` | - |
 | **Prompts** | | |
