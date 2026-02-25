@@ -67,6 +67,10 @@ export type {
   RateLimitInfo,
 } from './providers/github/index.js';
 
+// Auto-link utility
+export { autoLinkTask } from './auto-link.js';
+export type { AutoLinkTaskParams, AutoLinkTaskResult } from './auto-link.js';
+
 // Linear provider
 export {
   createLinearProvider,

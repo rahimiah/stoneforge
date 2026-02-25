@@ -12,7 +12,9 @@ import { updateOrchestratorTaskMeta } from '../../index.js';
 import type { Services } from '../services.js';
 import { formatTaskResponse } from '../formatters.js';
 import type { QuarryAPI } from '@stoneforge/quarry';
+import { autoLinkTask, loadConfig } from '@stoneforge/quarry';
 import { createLogger } from '../../utils/logger.js';
+import { createConfiguredProvider } from './external-sync-helpers.js';
 
 const logger = createLogger('orchestrator');
 
@@ -42,7 +44,7 @@ async function formatTaskWithDescription(task: Task, api: QuarryAPI, blockedIds?
 }
 
 export function createTaskRoutes(services: Services) {
-  const { api, agentRegistry, taskAssignmentService, dispatchService, workerTaskService, storageBackend, sessionManager } = services;
+  const { api, agentRegistry, taskAssignmentService, dispatchService, workerTaskService, storageBackend, sessionManager, settingsService } = services;
   const app = new Hono();
 
   /**
@@ -214,7 +216,42 @@ export function createTaskRoutes(services: Services) {
       });
 
       const savedTask = await api.create(taskData as unknown as Record<string, unknown> & { createdBy: EntityId });
-      return c.json({ task: formatTaskResponse(savedTask as unknown as Task) }, 201);
+      const task = savedTask as unknown as Task;
+
+      // Auto-link: create external issue if autoLink is enabled
+      let autoLinkWarning: string | undefined;
+      try {
+        const config = loadConfig();
+        if (config.externalSync.autoLink && config.externalSync.autoLinkProvider) {
+          const providerName = config.externalSync.autoLinkProvider;
+          const configured = createConfiguredProvider(providerName, settingsService);
+
+          if (configured) {
+            const result = await autoLinkTask({
+              task,
+              api,
+              provider: configured.provider,
+              project: configured.config.defaultProject!,
+              direction: config.externalSync.defaultDirection,
+            });
+
+            if (!result.success) {
+              autoLinkWarning = `Auto-link failed: ${result.error}`;
+              logger.warn(autoLinkWarning);
+            }
+          }
+        }
+      } catch (autoLinkErr) {
+        // Auto-link failure must never prevent task creation
+        autoLinkWarning = `Auto-link error: ${autoLinkErr instanceof Error ? autoLinkErr.message : String(autoLinkErr)}`;
+        logger.warn(autoLinkWarning);
+      }
+
+      const response: Record<string, unknown> = { task: formatTaskResponse(task) };
+      if (autoLinkWarning) {
+        response.warning = autoLinkWarning;
+      }
+      return c.json(response, 201);
     } catch (error) {
       logger.error('Failed to create task:', error);
       return c.json({ error: { code: 'INTERNAL_ERROR', message: String(error) } }, 500);
