@@ -7,7 +7,12 @@
  * @module
  */
 
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import * as pty from 'node-pty';
+
+const __codexInteractiveFilename = fileURLToPath(import.meta.url);
+const __codexInteractiveDir = dirname(__codexInteractiveFilename);
 import type { IPty } from 'node-pty';
 import type {
   InteractiveProvider,
@@ -107,6 +112,14 @@ export class CodexInteractiveProvider implements InteractiveProvider {
     if (options.stoneforgeRoot) {
       env.STONEFORGE_ROOT = options.stoneforgeRoot;
     }
+    // Prepend the sf CLI binary directory to PATH so agents can run `sf` commands.
+    // Resolve from this module's location (dist/providers/codex/) rather than
+    // stoneforgeRoot, which points to the managed project, not the sf installation.
+    const sfBinDir = resolve(__codexInteractiveDir, '../../bin');
+    env.PATH = sfBinDir + ':' + (env.PATH ?? '');
+    // Remove CLAUDECODE to prevent nested-session errors when Stoneforge
+    // itself runs inside Claude Code.
+    delete env.CLAUDECODE;
 
     const cols = options.cols ?? 120;
     const rows = options.rows ?? 30;

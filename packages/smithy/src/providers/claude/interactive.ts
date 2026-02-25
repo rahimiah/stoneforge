@@ -9,8 +9,12 @@
 
 import { randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, readdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+
+const __interactiveFilename = fileURLToPath(import.meta.url);
+const __interactiveDir = dirname(__interactiveFilename);
 import * as pty from 'node-pty';
 import type { IPty } from 'node-pty';
 import type {
@@ -130,10 +134,12 @@ export class ClaudeInteractiveProvider implements InteractiveProvider {
     };
     if (options.stoneforgeRoot) {
       env.STONEFORGE_ROOT = options.stoneforgeRoot;
-      // Prepend the sf CLI binary directory to PATH so agents can run `sf` commands
-      const sfBinDir = options.stoneforgeRoot + '/packages/smithy/dist/bin';
-      env.PATH = sfBinDir + ':' + (env.PATH ?? '');
     }
+    // Prepend the sf CLI binary directory to PATH so agents can run `sf` commands.
+    // Resolve from this module's location (dist/providers/claude/) rather than
+    // stoneforgeRoot, which points to the managed project, not the sf installation.
+    const sfBinDir = resolve(__interactiveDir, '../../bin');
+    env.PATH = sfBinDir + ':' + (env.PATH ?? '');
     // Remove CLAUDECODE to prevent "cannot be launched inside another Claude Code
     // session" error when the Stoneforge server itself runs inside Claude Code.
     delete env.CLAUDECODE;

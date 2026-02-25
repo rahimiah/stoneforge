@@ -8,7 +8,12 @@
  */
 
 import { spawn as cpSpawn } from 'node:child_process';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 import type { Query as SDKQuery, SDKMessage, SDKUserMessage, Options as SDKOptions, SpawnOptions, SpawnedProcess } from '@anthropic-ai/claude-agent-sdk';
 import type {
   HeadlessProvider,
@@ -335,10 +340,12 @@ export class ClaudeHeadlessProvider implements HeadlessProvider {
     };
     if (options.stoneforgeRoot) {
       env.STONEFORGE_ROOT = options.stoneforgeRoot;
-      // Prepend the sf CLI binary directory to PATH so agents can run `sf` commands
-      const sfBinDir = options.stoneforgeRoot + '/packages/smithy/dist/bin';
-      env.PATH = sfBinDir + ':' + (env.PATH ?? '');
     }
+    // Prepend the sf CLI binary directory to PATH so agents can run `sf` commands.
+    // Resolve from this module's location (dist/providers/claude/) rather than
+    // stoneforgeRoot, which points to the managed project, not the sf installation.
+    const sfBinDir = resolve(__dirname, '../../bin');
+    env.PATH = sfBinDir + ':' + (env.PATH ?? '');
     // Remove CLAUDECODE to prevent "cannot be launched inside another Claude Code
     // session" error when the Stoneforge server itself runs inside Claude Code.
     delete env.CLAUDECODE;

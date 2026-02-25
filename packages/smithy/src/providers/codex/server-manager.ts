@@ -12,7 +12,12 @@
 
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { CodexJsonRpcClient } from './jsonrpc-client.js';
+
+const __codexFilename = fileURLToPath(import.meta.url);
+const __codexDir = dirname(__codexFilename);
 import type { NotificationHandler } from './jsonrpc-client.js';
 
 // ============================================================================
@@ -134,6 +139,14 @@ class CodexServerManager {
     if (config?.stoneforgeRoot) {
       env.STONEFORGE_ROOT = config.stoneforgeRoot;
     }
+    // Prepend the sf CLI binary directory to PATH so agents can run `sf` commands.
+    // Resolve from this module's location (dist/providers/codex/) rather than
+    // stoneforgeRoot, which points to the managed project, not the sf installation.
+    const sfBinDir = resolve(__codexDir, '../../bin');
+    env.PATH = sfBinDir + ':' + (env.PATH ?? '');
+    // Remove CLAUDECODE to prevent nested-session errors when Stoneforge
+    // itself runs inside Claude Code.
+    delete env.CLAUDECODE;
 
     const child = spawn('codex', ['app-server'], {
       stdio: ['pipe', 'pipe', 'pipe'],
