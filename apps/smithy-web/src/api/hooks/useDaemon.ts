@@ -1,7 +1,7 @@
 /**
  * React Query hooks for dispatch daemon control
  *
- * Provides hooks for fetching daemon status and starting/stopping the daemon.
+ * Provides hooks for fetching daemon status, starting/stopping the daemon, and waking it from rate-limit pauses.
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -23,6 +23,11 @@ export interface DaemonStatusResponse {
     workflowTaskPollEnabled: boolean;
     directorInboxForwardingEnabled: boolean;
   };
+  rateLimit?: {
+    isPaused: boolean;
+    limits: Array<{ executable: string; resetsAt: string }>;
+    soonestReset?: string;
+  };
 }
 
 export interface DaemonStartResponse {
@@ -39,6 +44,11 @@ export interface DaemonStopResponse {
   wasRunning: boolean;
   wasServerManaged: boolean;
   message?: string;
+}
+
+export interface DaemonWakeResponse {
+  success: boolean;
+  message: string;
 }
 
 // ============================================================================
@@ -110,6 +120,24 @@ export function useStopDaemon() {
   return useMutation<DaemonStopResponse, Error>({
     mutationFn: async () => {
       return fetchApi<DaemonStopResponse>('/daemon/stop', {
+        method: 'POST',
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['daemon-status'] });
+    },
+  });
+}
+
+/**
+ * Hook to wake the daemon from a rate-limit pause
+ */
+export function useWakeDaemon() {
+  const queryClient = useQueryClient();
+
+  return useMutation<DaemonWakeResponse, Error>({
+    mutationFn: async () => {
+      return fetchApi<DaemonWakeResponse>('/daemon/wake', {
         method: 'POST',
       });
     },
