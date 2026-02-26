@@ -49,6 +49,8 @@ export interface DispatchOptions {
   worktree?: string;
   /** Claude Code session ID */
   sessionId?: string;
+  /** Provider that created the session (e.g., 'claude-code', 'codex') */
+  sessionProvider?: string;
   /** Priority level (higher = more urgent). Used for notification message. */
   priority?: number;
   /** Whether to signal the agent to restart its session */
@@ -100,6 +102,7 @@ export interface DispatchNotificationMetadata {
   branch?: string;
   worktree?: string;
   sessionId?: string;
+  sessionProvider?: string;
   dispatchedAt: Timestamp;
   dispatchedBy?: EntityId;
   [key: string]: unknown;
@@ -237,6 +240,7 @@ export class DispatchServiceImpl implements DispatchService {
       branch: options?.branch,
       worktree: options?.worktree,
       sessionId: options?.sessionId,
+      sessionProvider: options?.sessionProvider,
       markAsStarted: options?.markAsStarted,
     };
     const updatedTask = await this.taskAssignment.assignToAgent(
@@ -258,6 +262,7 @@ export class DispatchServiceImpl implements DispatchService {
       branch: assignOptions.branch,
       worktree: assignOptions.worktree,
       sessionId: assignOptions.sessionId,
+      sessionProvider: assignOptions.sessionProvider,
       dispatchedAt,
       dispatchedBy: options?.dispatchedBy,
       ...(options?.notificationMetadata ?? {}),

@@ -467,7 +467,7 @@ describe('recoverOrphanedAssignments', () => {
   async function createAssignedTask(
     title: string,
     workerId: EntityId,
-    meta?: { sessionId?: string; worktree?: string; branch?: string }
+    meta?: { sessionId?: string; sessionProvider?: string; worktree?: string; branch?: string }
   ): Promise<Task> {
     const task = await createTask({
       title,
@@ -485,6 +485,7 @@ describe('recoverOrphanedAssignments', () => {
           branch: meta.branch ?? 'agent/test/task-branch',
           worktree: meta.worktree ?? '/worktrees/test/task',
           sessionId: meta.sessionId,
+          sessionProvider: meta.sessionProvider,
         }),
       });
     }
@@ -598,6 +599,37 @@ describe('recoverOrphanedAssignments', () => {
     expect(updatedMeta?.sessionId).not.toBe('stale-session-789');
   });
 
+  test('skips resume when sessionProvider does not match worker provider', async () => {
+    const worker = await createTestWorker('provider-mismatch-worker');
+    const workerId = worker.id as unknown as EntityId;
+    const task = await createAssignedTask('Task with provider mismatch', workerId, {
+      sessionId: 'claude-session-123',
+      sessionProvider: 'claude-code',
+      worktree: '/worktrees/provider-mismatch-worker/task',
+      branch: 'agent/provider-mismatch-worker/task-branch',
+    });
+
+    // Set worker provider to codex so it mismatches with stored sessionProvider
+    await agentRegistry.updateAgentMetadata(workerId, { provider: 'codex' });
+
+    const result = await daemon.recoverOrphanedAssignments();
+
+    expect(result.processed).toBe(1);
+    expect(sessionManager.resumeSession).not.toHaveBeenCalled();
+    expect(sessionManager.startSession).toHaveBeenCalledWith(
+      workerId,
+      expect.objectContaining({
+        workingDirectory: '/worktrees/provider-mismatch-worker/task',
+      })
+    );
+
+    const updatedTask = await api.get<Task>(task.id);
+    const updatedMeta = getOrchestratorTaskMeta(updatedTask!.metadata as Record<string, unknown>);
+    expect(updatedMeta?.sessionProvider).toBe('codex');
+    expect(updatedMeta?.sessionId).toBeDefined();
+    expect(updatedMeta?.sessionId).not.toBe('claude-session-123');
+  });
+
   test('does not increment resumeCount when recoverOrphanedTask throws', async () => {
     const worker = await createTestWorker('fail-recovery-worker');
     const workerId = worker.id as unknown as EntityId;
@@ -632,7 +664,7 @@ describe('recoverOrphanedAssignments', () => {
     expect(meta?.resumeCount).toBe(1);
   });
 
-  test('increments resumeCount after recoverOrphanedTask succeeds', async () => {
+  test('does not increment resumeCount immediately after recoverOrphanedTask succeeds', async () => {
     const worker = await createTestWorker('success-recovery-worker');
     const workerId = worker.id as unknown as EntityId;
     const task = await createAssignedTask('Task with successful recovery', workerId, {
@@ -660,10 +692,10 @@ describe('recoverOrphanedAssignments', () => {
     expect(result.processed).toBe(1);
     expect(result.errors).toBe(0);
 
-    // resumeCount should have been incremented to 2
+    // resumeCount should remain unchanged until the recovered session exits successfully.
     const updatedTask = await api.get<Task>(task.id);
     const meta = getOrchestratorTaskMeta(updatedTask!.metadata as Record<string, unknown>);
-    expect(meta?.resumeCount).toBe(2);
+    expect(meta?.resumeCount).toBe(1);
   });
 
   test('does not recover tasks in REVIEW status', async () => {
@@ -2939,7 +2971,7 @@ describe('recoverOrphanedAssignments - rate limit guard', () => {
   async function createAssignedTask(
     title: string,
     workerId: EntityId,
-    meta?: { sessionId?: string; worktree?: string; branch?: string; resumeCount?: number }
+    meta?: { sessionId?: string; sessionProvider?: string; worktree?: string; branch?: string; resumeCount?: number }
   ): Promise<Task> {
     const task = await createTask({
       title,
@@ -2955,6 +2987,7 @@ describe('recoverOrphanedAssignments - rate limit guard', () => {
         branch: meta?.branch ?? 'agent/test/task-branch',
         worktree: meta?.worktree ?? '/worktrees/test/task',
         sessionId: meta?.sessionId,
+        sessionProvider: meta?.sessionProvider,
         resumeCount: meta?.resumeCount,
       }),
     });
@@ -3038,10 +3071,10 @@ describe('recoverOrphanedAssignments - rate limit guard', () => {
     // Should process normally — no rate limits blocking
     expect(result.processed).toBe(1);
 
-    // resumeCount should have been incremented
+    // resumeCount should not increment until recovered session exits successfully
     const updatedTask = await api.get<Task>(task.id);
     const meta = getOrchestratorTaskMeta(updatedTask!.metadata as Record<string, unknown>);
-    expect(meta?.resumeCount).toBe(2);
+    expect(meta?.resumeCount).toBe(1);
   });
 
   test('skips steward orphan recovery when all executables are rate-limited (Phase 2)', async () => {
@@ -3489,7 +3522,7 @@ describe('recoverOrphanedTask - rapid-exit detection', () => {
     return (await api.get<Task>(saved.id))!;
   }
 
-  test('rolls back resumeCount when session exits rapidly without output', async () => {
+  test('does NOT increment resumeCount when session exits rapidly without output', async () => {
     const worker = await createTestWorker('rapid-exit-worker');
     const workerId = worker.id as unknown as EntityId;
     const task = await createAssignedTask('Task with rapid exit', workerId, {
@@ -3501,10 +3534,10 @@ describe('recoverOrphanedTask - rapid-exit detection', () => {
     const result = await daemon.recoverOrphanedAssignments();
     expect(result.processed).toBe(1);
 
-    // After recovery, resumeCount should be incremented to 2
+    // resumeCount should NOT increment before exit handling
     let updatedTask = await api.get<Task>(task.id);
     let meta = getOrchestratorTaskMeta(updatedTask!.metadata as Record<string, unknown>);
-    expect(meta?.resumeCount).toBe(2);
+    expect(meta?.resumeCount).toBe(1);
 
     // Simulate rapid exit — emit exit immediately without any assistant events
     const events = (sessionManager as ReturnType<typeof createMockSessionManagerWithEvents>)._lastEvents!;
@@ -3513,7 +3546,7 @@ describe('recoverOrphanedTask - rapid-exit detection', () => {
     // Wait for async handler to complete
     await new Promise(resolve => setTimeout(resolve, 50));
 
-    // resumeCount should be rolled back to 1
+    // resumeCount should remain unchanged on rapid exit
     updatedTask = await api.get<Task>(task.id);
     meta = getOrchestratorTaskMeta(updatedTask!.metadata as Record<string, unknown>);
     expect(meta?.resumeCount).toBe(1);
@@ -3547,7 +3580,7 @@ describe('recoverOrphanedTask - rapid-exit detection', () => {
     expect(status.isPaused).toBe(true);
   });
 
-  test('does NOT roll back resumeCount when session produces assistant events before exiting', async () => {
+  test('increments resumeCount when session produces assistant output before exiting', async () => {
     const worker = await createTestWorker('normal-exit-worker');
     const workerId = worker.id as unknown as EntityId;
     const task = await createAssignedTask('Task with normal output', workerId, {
@@ -3558,10 +3591,10 @@ describe('recoverOrphanedTask - rapid-exit detection', () => {
     // Trigger orphan recovery
     await daemon.recoverOrphanedAssignments();
 
-    // resumeCount should be 2 now
+    // resumeCount should not increment before exit handling
     let updatedTask = await api.get<Task>(task.id);
     let meta = getOrchestratorTaskMeta(updatedTask!.metadata as Record<string, unknown>);
-    expect(meta?.resumeCount).toBe(2);
+    expect(meta?.resumeCount).toBe(1);
 
     // Simulate session producing assistant events then exiting quickly
     const events = (sessionManager as ReturnType<typeof createMockSessionManagerWithEvents>)._lastEvents!;
@@ -3571,13 +3604,13 @@ describe('recoverOrphanedTask - rapid-exit detection', () => {
     // Wait for async handler
     await new Promise(resolve => setTimeout(resolve, 50));
 
-    // resumeCount should NOT be rolled back (session produced output)
+    // resumeCount should increment after a non-rapid-success path
     updatedTask = await api.get<Task>(task.id);
     meta = getOrchestratorTaskMeta(updatedTask!.metadata as Record<string, unknown>);
     expect(meta?.resumeCount).toBe(2);
   });
 
-  test('does NOT roll back resumeCount when session runs longer than threshold', async () => {
+  test('increments resumeCount when session runs longer than rapid-exit threshold', async () => {
     const worker = await createTestWorker('long-session-worker');
     const workerId = worker.id as unknown as EntityId;
     const task = await createAssignedTask('Task with long session', workerId, {
@@ -3585,20 +3618,33 @@ describe('recoverOrphanedTask - rapid-exit detection', () => {
       resumeCount: 1,
     });
 
-    // Trigger orphan recovery
-    await daemon.recoverOrphanedAssignments();
+    const dateWithMutableNow = Date as unknown as { now: () => number };
+    const originalNow = dateWithMutableNow.now;
+    let fakeNow = 1_700_000_000_000;
 
-    // Manually verify resumeCount was incremented
-    let updatedTask = await api.get<Task>(task.id);
-    let meta = getOrchestratorTaskMeta(updatedTask!.metadata as Record<string, unknown>);
-    expect(meta?.resumeCount).toBe(2);
+    try {
+      dateWithMutableNow.now = () => fakeNow;
 
-    // Wait longer than the rapid-exit threshold, then exit without assistant events
-    // Note: We can't easily wait 10+ seconds in a test, but the threshold check
-    // is based on Date.now() - startTime. Since the test runs fast, the exit
-    // within this test will be < RAPID_EXIT_THRESHOLD_MS and would trigger detection.
-    // To test the "long session" case properly, we'd need to mock Date.now().
-    // For now, we verify that assistant events prevent rollback (covered above).
+      await daemon.recoverOrphanedAssignments();
+
+      // resumeCount should not increment before exit handling
+      let updatedTask = await api.get<Task>(task.id);
+      let meta = getOrchestratorTaskMeta(updatedTask!.metadata as Record<string, unknown>);
+      expect(meta?.resumeCount).toBe(1);
+
+      // Advance time beyond rapid-exit threshold and then emit exit
+      fakeNow += RAPID_EXIT_THRESHOLD_MS + 100;
+      const events = (sessionManager as ReturnType<typeof createMockSessionManagerWithEvents>)._lastEvents!;
+      events.emit('exit', 0, null);
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      updatedTask = await api.get<Task>(task.id);
+      meta = getOrchestratorTaskMeta(updatedTask!.metadata as Record<string, unknown>);
+      expect(meta?.resumeCount).toBe(2);
+    } finally {
+      dateWithMutableNow.now = originalNow;
+    }
   });
 
   test('rapid-exit detection works with resume path (previous sessionId)', async () => {
@@ -3614,10 +3660,10 @@ describe('recoverOrphanedTask - rapid-exit detection', () => {
     const result = await daemon.recoverOrphanedAssignments();
     expect(result.processed).toBe(1);
 
-    // resumeCount should be 3 now
+    // resumeCount should not increment before exit handling
     let updatedTask = await api.get<Task>(task.id);
     let meta = getOrchestratorTaskMeta(updatedTask!.metadata as Record<string, unknown>);
-    expect(meta?.resumeCount).toBe(3);
+    expect(meta?.resumeCount).toBe(2);
 
     // Simulate rapid exit on the resumed session
     const events = (sessionManager as ReturnType<typeof createMockSessionManagerWithEvents>)._lastEvents!;
@@ -3626,7 +3672,7 @@ describe('recoverOrphanedTask - rapid-exit detection', () => {
     // Wait for async handler
     await new Promise(resolve => setTimeout(resolve, 50));
 
-    // resumeCount should be rolled back to 2
+    // Rapid exit should not increment resumeCount
     updatedTask = await api.get<Task>(task.id);
     meta = getOrchestratorTaskMeta(updatedTask!.metadata as Record<string, unknown>);
     expect(meta?.resumeCount).toBe(2);

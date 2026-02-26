@@ -8,6 +8,34 @@
 
 import { describe, it, expect, mock } from 'bun:test';
 import type { AgentMessage } from '../types.js';
+import type { HeadlessSpawnOptions } from '../types.js';
+
+type MockCodexClient = ReturnType<typeof createMockClient>;
+
+const mockServerManagerState: {
+  client: MockCodexClient;
+  acquireCalls: Array<{ cwd?: string; stoneforgeRoot?: string }>;
+  releaseCalls: number;
+} = {
+  client: createMockClient('thr-default'),
+  acquireCalls: [],
+  releaseCalls: 0,
+};
+
+mock.module('./server-manager.js', () => ({
+  serverManager: {
+    acquire: mock(async (options?: { cwd?: string; stoneforgeRoot?: string }) => {
+      mockServerManagerState.acquireCalls.push({
+        cwd: options?.cwd,
+        stoneforgeRoot: options?.stoneforgeRoot,
+      });
+      return mockServerManagerState.client;
+    }),
+    release: mock(() => {
+      mockServerManagerState.releaseCalls += 1;
+    }),
+  },
+}));
 
 // ---------------------------------------------------------------------------
 // Mock helpers
@@ -438,5 +466,57 @@ describe('Codex headless event mapping', () => {
       expect(handler2Messages.length).toBe(1);
       expect((handler2Messages[0].params as any).delta).toBe('second');
     });
+  });
+});
+
+describe('CodexHeadlessProvider spawn fallback', () => {
+  it('falls back to thread.start when thread.resume fails', async () => {
+    const client = createMockClient('thr-fallback');
+    (client.thread.resume as ReturnType<typeof mock>).mockImplementation(async () => {
+      throw new Error('thread not found');
+    });
+    mockServerManagerState.client = client;
+    mockServerManagerState.acquireCalls = [];
+    mockServerManagerState.releaseCalls = 0;
+
+    const { CodexHeadlessProvider } = await import('./headless.js');
+    const provider = new CodexHeadlessProvider();
+
+    const options: HeadlessSpawnOptions = {
+      workingDirectory: '/tmp/codex-worker',
+      stoneforgeRoot: '/tmp/stoneforge',
+      resumeSessionId: 'thr-stale',
+      initialPrompt: 'continue task',
+      model: 'gpt-5',
+    };
+
+    const session = await provider.spawn(options);
+    session.close();
+
+    expect(client.thread.resume).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: 'thr-stale',
+        cwd: '/tmp/codex-worker',
+        model: 'gpt-5',
+      })
+    );
+    expect(client.thread.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cwd: '/tmp/codex-worker',
+        model: 'gpt-5',
+      })
+    );
+    expect(client.turn.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: 'thr-fallback',
+        input: [{ type: 'text', text: 'continue task' }],
+      })
+    );
+    expect(mockServerManagerState.acquireCalls).toHaveLength(1);
+    expect(mockServerManagerState.acquireCalls[0]).toEqual({
+      cwd: '/tmp/stoneforge',
+      stoneforgeRoot: '/tmp/stoneforge',
+    });
+    expect(mockServerManagerState.releaseCalls).toBeGreaterThanOrEqual(1);
   });
 });

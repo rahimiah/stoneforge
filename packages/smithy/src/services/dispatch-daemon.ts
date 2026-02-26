@@ -1145,19 +1145,13 @@ export class DispatchDaemonImpl implements DispatchDaemon {
             this.operationLog?.write('error', 'recovery', `Failed to spawn recovery steward for worker ${worker.name}: ${errorMessage}`, { agentId: worker.id, taskId: taskAssignment.task.id });
           }
         } else {
-          // Normal recovery: re-spawn the worker, then increment resume count on success
+          // Normal recovery: re-spawn the worker.
+          // NOTE: We do NOT increment resumeCount here. The rapid-exit detector will
+          // increment it in its onExit callback only if the session ran successfully
+          // (duration > threshold OR produced assistant output). This prevents rapid
+          // exits (e.g., rate limits, Codex thread failures) from burning the resume budget.
           try {
             await this.recoverOrphanedTask(worker, taskAssignment.task, taskAssignment.orchestratorMeta);
-            // Only increment resumeCount after successful recovery — if recovery fails,
-            // the count stays the same so the task isn't prematurely flagged as stuck.
-            // Re-read task metadata since recoverOrphanedTask may have updated it (e.g., new sessionId).
-            const freshTask = await this.api.get<Task>(taskAssignment.task.id);
-            await this.api.update<Task>(taskAssignment.task.id, {
-              metadata: updateOrchestratorTaskMeta(
-                freshTask?.metadata as Record<string, unknown> | undefined,
-                { resumeCount: resumeCount + 1 }
-              ),
-            });
             processed++;
           } catch (error) {
             errors++;
@@ -1908,7 +1902,28 @@ export class DispatchDaemonImpl implements DispatchDaemon {
 
     // 2. Try resume first if we have a previous session ID
     const previousSessionId = taskMeta?.sessionId;
-    if (previousSessionId) {
+    const previousSessionProvider = taskMeta?.sessionProvider;
+
+    // Get current worker's provider to compare with stored sessionProvider
+    const workerMeta = getAgentMetadata(worker);
+    const currentWorkerProvider = (workerMeta as { provider?: string } | undefined)?.provider ?? 'claude-code';
+
+    // Skip resume if sessionProvider doesn't match current worker's provider.
+    // This prevents cross-provider resume attempts (e.g., Codex trying to resume a Claude session).
+    const providerMismatch = previousSessionProvider && previousSessionProvider !== currentWorkerProvider;
+    if (providerMismatch) {
+      logger.info(
+        `Skipping session resume for task ${task.id}: session provider '${previousSessionProvider}' doesn't match worker provider '${currentWorkerProvider}'`
+      );
+      // Clear the stale sessionId/sessionProvider so next recovery doesn't check again
+      const clearedMeta = updateOrchestratorTaskMeta(
+        task.metadata as Record<string, unknown> | undefined,
+        { sessionId: undefined, sessionProvider: undefined }
+      );
+      await this.api.update(task.id, { metadata: clearedMeta });
+    }
+
+    if (previousSessionId && !providerMismatch) {
       try {
         const { session, events } = await this.sessionManager.resumeSession(workerId, {
           providerSessionId: previousSessionId,
@@ -2000,10 +2015,13 @@ export class DispatchDaemonImpl implements DispatchDaemon {
         taskAfterFreshSpawn.metadata as Record<string, unknown> | undefined,
         freshSpawnHistoryEntry
       );
-      // Write the new session ID so future recovery cycles can resume this session
+      // Write the new session ID and provider so future recovery cycles can resume this session
       const metadataWithSessionId = updateOrchestratorTaskMeta(
         metadataWithHistory,
-        { sessionId: session.providerSessionId ?? session.id }
+        {
+          sessionId: session.providerSessionId ?? session.id,
+          sessionProvider: currentWorkerProvider,
+        }
       );
       await this.api.update<Task>(task.id, { metadata: metadataWithSessionId });
     }
@@ -2096,6 +2114,27 @@ export class DispatchDaemonImpl implements DispatchDaemon {
         logger.info(
           `Applied conservative fallback rate limit (1 hour) for suspected silent rate limit on task ${task.id}`
         );
+      } else {
+        // Session ran successfully (duration > threshold OR produced assistant output).
+        // This is where we increment resumeCount, ensuring rapid exits don't burn the budget.
+        try {
+          const currentTask = await this.api.get<Task>(task.id);
+          if (currentTask) {
+            const currentMeta = getOrchestratorTaskMeta(currentTask.metadata as Record<string, unknown>);
+            const currentResumeCount = currentMeta?.resumeCount ?? 0;
+            await this.api.update<Task>(task.id, {
+              metadata: updateOrchestratorTaskMeta(
+                currentTask.metadata as Record<string, unknown> | undefined,
+                { resumeCount: currentResumeCount + 1 }
+              ),
+            });
+            logger.debug(
+              `Incremented resumeCount for task ${task.id} from ${currentResumeCount} to ${currentResumeCount + 1}`
+            );
+          }
+        } catch (error) {
+          logger.warn(`Failed to increment resumeCount for task ${task.id}:`, error);
+        }
       }
     };
 
@@ -2128,7 +2167,27 @@ export class DispatchDaemonImpl implements DispatchDaemon {
 
     // 2. Try resume first if we have a previous session ID
     const previousSessionId = taskMeta?.sessionId;
-    if (previousSessionId) {
+    const previousSessionProvider = taskMeta?.sessionProvider;
+
+    // Get current steward's provider to compare with stored sessionProvider
+    const stewardMeta = getAgentMetadata(steward);
+    const currentStewardProvider = (stewardMeta as { provider?: string } | undefined)?.provider ?? 'claude-code';
+
+    // Skip resume if sessionProvider doesn't match current steward's provider
+    const providerMismatch = previousSessionProvider && previousSessionProvider !== currentStewardProvider;
+    if (providerMismatch) {
+      logger.info(
+        `Skipping steward session resume for task ${task.id}: session provider '${previousSessionProvider}' doesn't match steward provider '${currentStewardProvider}'`
+      );
+      // Clear the stale sessionId/sessionProvider
+      const clearedMeta = updateOrchestratorTaskMeta(
+        task.metadata as Record<string, unknown> | undefined,
+        { sessionId: undefined, sessionProvider: undefined }
+      );
+      await this.api.update(task.id, { metadata: clearedMeta });
+    }
+
+    if (previousSessionId && !providerMismatch) {
       try {
         const { session, events } = await this.sessionManager.resumeSession(stewardId, {
           providerSessionId: previousSessionId,
@@ -2295,12 +2354,16 @@ export class DispatchDaemonImpl implements DispatchDaemon {
     });
 
     // Session started successfully — now dispatch the task (assigns + sends message)
+    // Determine the effective provider for this session (either the fallback or the worker's default)
+    const workerMeta = getAgentMetadata(worker);
+    const effectiveProvider = executableOverride ?? (workerMeta as { provider?: string } | undefined)?.provider ?? 'claude-code';
     const dispatchOptions: DispatchOptions = {
       branch,
       worktree: worktreePath,
       markAsStarted: true,
       priority: task.priority,
       sessionId: session.providerSessionId ?? session.id,
+      sessionProvider: effectiveProvider,
     };
 
     await this.dispatchService.dispatch(task.id, workerId, dispatchOptions);
@@ -2665,12 +2728,16 @@ export class DispatchDaemonImpl implements DispatchDaemon {
       taskAfterSync?.metadata as Record<string, unknown> | undefined,
       sessionHistoryEntry
     );
+    // Determine the effective provider for this steward session
+    const stewardMeta = getAgentMetadata(steward);
+    const effectiveStewardProvider = stewardExecutableOverride ?? (stewardMeta as { provider?: string } | undefined)?.provider ?? 'claude-code';
     const finalMetadata = updateOrchestratorTaskMeta(
       metadataWithHistory,
       {
         assignedAgent: stewardId,
         mergeStatus: 'testing' as const,
         sessionId: session.providerSessionId ?? session.id,
+        sessionProvider: effectiveStewardProvider,
       }
     );
     await this.api.update<Task>(task.id, {
@@ -2851,11 +2918,15 @@ export class DispatchDaemonImpl implements DispatchDaemon {
         taskAfterUpdate?.metadata as Record<string, unknown> | undefined,
         sessionHistoryEntry
       );
+      // Determine the effective provider for this recovery steward session
+      const recoveryStewardMeta = getAgentMetadata(recoverySteward);
+      const effectiveRecoveryProvider = recoveryExecutableOverride ?? (recoveryStewardMeta as { provider?: string } | undefined)?.provider ?? 'claude-code';
       const finalMetadata = updateOrchestratorTaskMeta(
         metadataWithHistory,
         {
           assignedAgent: stewardId,
           sessionId: session.providerSessionId ?? session.id,
+          sessionProvider: effectiveRecoveryProvider,
         }
       );
       await this.api.update<Task>(task.id, {

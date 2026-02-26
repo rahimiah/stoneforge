@@ -52,6 +52,8 @@ export interface AssignTaskOptions {
   worktree?: string;
   /** Claude Code session ID */
   sessionId?: string;
+  /** Provider that created the session (e.g., 'claude-code', 'codex') */
+  sessionProvider?: string;
   /** Whether to mark the task as started immediately */
   markAsStarted?: boolean;
 }
@@ -395,6 +397,7 @@ export class TaskAssignmentServiceImpl implements TaskAssignmentService {
       branch: options?.branch ?? existingMeta?.handoffBranch ?? branch,
       worktree: options?.worktree ?? existingMeta?.handoffWorktree ?? worktree,
       sessionId: options?.sessionId,
+      sessionProvider: options?.sessionProvider,
       mergeStatus: 'pending' as MergeStatus,
       // Preserve handoff history from previous assignments
       handoffHistory: existingMeta?.handoffHistory,

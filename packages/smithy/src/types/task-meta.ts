@@ -38,6 +38,10 @@ export interface OrchestratorTaskMeta {
   /** Claude Code session ID for this task, enabling session resumption */
   readonly sessionId?: string;
 
+  /** Provider that created the session (e.g., 'claude-code', 'codex'). Used to prevent
+   *  cross-provider resume attempts (e.g., a Codex worker trying to resume a Claude session). */
+  readonly sessionProvider?: string;
+
   /** Entity ID of the agent assigned to this task */
   readonly assignedAgent?: EntityId;
 

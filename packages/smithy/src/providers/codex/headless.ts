@@ -18,6 +18,9 @@ import { AsyncQueue } from '../opencode/async-queue.js';
 import { CodexEventMapper } from './event-mapper.js';
 import { serverManager } from './server-manager.js';
 import type { CodexClient } from './server-manager.js';
+import { createLogger } from '../../utils/logger.js';
+
+const logger = createLogger('codex-headless');
 
 // ============================================================================
 // Codex Headless Session
@@ -139,50 +142,61 @@ export class CodexHeadlessProvider implements HeadlessProvider {
 
     try {
       if (options.resumeSessionId) {
-        // 2a. Resume: load the thread into the server and re-configure it
-        const result = await client.thread.resume({
-          threadId: options.resumeSessionId,
-          model: options.model,
-          cwd: options.workingDirectory,
-          approvalPolicy: 'never',
-          sandbox: 'danger-full-access',
-        });
-        threadId = result.thread.id;
+        // 2a. Resume: try to load the thread into the server and re-configure it.
+        // If resume fails (e.g., thread not found, expired, corrupted), fall back
+        // to starting a fresh thread to avoid crash loops.
+        try {
+          const result = await client.thread.resume({
+            threadId: options.resumeSessionId,
+            model: options.model,
+            cwd: options.workingDirectory,
+            approvalPolicy: 'never',
+            sandbox: 'danger-full-access',
+          });
+          threadId = result.thread.id;
 
-        // Create session
-        const session = new CodexHeadlessSession(client, threadId);
-        session.injectInitMessage();
+          // Create session
+          const session = new CodexHeadlessSession(client, threadId);
+          session.injectInitMessage();
 
-        // Send initial prompt as a new turn if provided
-        if (options.initialPrompt) {
-          session.sendMessage(options.initialPrompt);
+          // Send initial prompt as a new turn if provided
+          if (options.initialPrompt) {
+            session.sendMessage(options.initialPrompt);
+          }
+
+          return session;
+        } catch (resumeError) {
+          // Resume failed — fall back to starting a fresh thread.
+          // Log the error but don't throw; the fallback below will create a new thread.
+          logger.warn(
+            `Codex thread.resume failed for ${options.resumeSessionId}, falling back to fresh thread: ${resumeError instanceof Error ? resumeError.message : String(resumeError)}`
+          );
+          // Fall through to the fresh thread creation below
         }
-
-        return session;
-      } else {
-        // 2b. New thread: thread/start only creates the thread (does NOT run a
-        // turn). We must call turn/start separately via sendMessage() to get
-        // LLM output notifications.
-        const result = await client.thread.start({
-          model: options.model,
-          cwd: options.workingDirectory,
-          approvalPolicy: 'never',
-          sandbox: 'danger-full-access',
-        });
-
-        if (!result?.thread?.id) {
-          throw new Error('Codex thread creation failed: no thread ID returned');
-        }
-        threadId = result.thread.id;
-
-        const session = new CodexHeadlessSession(client, threadId);
-        session.injectInitMessage();
-
-        // Explicitly start the first turn — thread/start does not do this
-        session.sendMessage(options.initialPrompt ?? 'Hello');
-
-        return session;
       }
+
+      // 2b. New thread (or fallback from failed resume):
+      // thread/start only creates the thread (does NOT run a turn).
+      // We must call turn/start separately via sendMessage() to get LLM output notifications.
+      const result = await client.thread.start({
+        model: options.model,
+        cwd: options.workingDirectory,
+        approvalPolicy: 'never',
+        sandbox: 'danger-full-access',
+      });
+
+      if (!result?.thread?.id) {
+        throw new Error('Codex thread creation failed: no thread ID returned');
+      }
+      threadId = result.thread.id;
+
+      const session = new CodexHeadlessSession(client, threadId);
+      session.injectInitMessage();
+
+      // Explicitly start the first turn — thread/start does not do this
+      session.sendMessage(options.initialPrompt ?? 'Hello');
+
+      return session;
     } catch (error) {
       // Release on failure
       serverManager.release();
