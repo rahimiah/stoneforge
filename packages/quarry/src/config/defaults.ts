@@ -15,6 +15,7 @@ import type {
   ProjectConfigSection,
   PluginsConfig,
   ExternalSyncConfig,
+  MergeConfig,
 } from './types.js';
 
 // ============================================================================
@@ -101,6 +102,16 @@ export const DEFAULT_EXTERNAL_SYNC_CONFIG: ExternalSyncConfig = {
 };
 
 /**
+ * Default merge automation configuration
+ */
+export const DEFAULT_MERGE_CONFIG: MergeConfig = {
+  provider: 'local',
+  ciTimeoutMinutes: 30,
+  requiredChecks: [],
+  deleteBranchOnMerge: true,
+};
+
+/**
  * Complete default configuration
  */
 export const DEFAULT_CONFIG: Configuration = {
@@ -114,6 +125,7 @@ export const DEFAULT_CONFIG: Configuration = {
   project: DEFAULT_PROJECT_CONFIG,
   plugins: DEFAULT_PLUGINS_CONFIG,
   externalSync: DEFAULT_EXTERNAL_SYNC_CONFIG,
+  merge: DEFAULT_MERGE_CONFIG,
 };
 
 // ============================================================================
@@ -176,5 +188,11 @@ export function getDefaultConfig(): Configuration {
     project: { ...DEFAULT_PROJECT_CONFIG },
     plugins: { packages: [...DEFAULT_PLUGINS_CONFIG.packages] },
     externalSync: { ...DEFAULT_EXTERNAL_SYNC_CONFIG },
+    merge: {
+      provider: DEFAULT_MERGE_CONFIG.provider,
+      ciTimeoutMinutes: DEFAULT_MERGE_CONFIG.ciTimeoutMinutes,
+      requiredChecks: [...DEFAULT_MERGE_CONFIG.requiredChecks],
+      deleteBranchOnMerge: DEFAULT_MERGE_CONFIG.deleteBranchOnMerge,
+    },
   };
 }

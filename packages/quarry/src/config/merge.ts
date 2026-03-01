@@ -109,6 +109,12 @@ export function mergeConfiguration(
       autoLink: partial.externalSync?.autoLink !== undefined ? partial.externalSync.autoLink : base.externalSync.autoLink,
       autoLinkProvider: partial.externalSync?.autoLinkProvider !== undefined ? partial.externalSync.autoLinkProvider : base.externalSync.autoLinkProvider,
     },
+    merge: {
+      provider: partial.merge?.provider !== undefined ? partial.merge.provider : base.merge.provider,
+      ciTimeoutMinutes: partial.merge?.ciTimeoutMinutes !== undefined ? partial.merge.ciTimeoutMinutes : base.merge.ciTimeoutMinutes,
+      requiredChecks: partial.merge?.requiredChecks !== undefined ? partial.merge.requiredChecks : [...base.merge.requiredChecks],
+      deleteBranchOnMerge: partial.merge?.deleteBranchOnMerge !== undefined ? partial.merge.deleteBranchOnMerge : base.merge.deleteBranchOnMerge,
+    },
   };
   return result;
 }
@@ -189,6 +195,12 @@ export function cloneConfiguration(config: Configuration): Configuration {
       defaultDirection: config.externalSync.defaultDirection,
       autoLink: config.externalSync.autoLink,
       autoLinkProvider: config.externalSync.autoLinkProvider,
+    },
+    merge: {
+      provider: config.merge.provider,
+      ciTimeoutMinutes: config.merge.ciTimeoutMinutes,
+      requiredChecks: [...config.merge.requiredChecks],
+      deleteBranchOnMerge: config.merge.deleteBranchOnMerge,
     },
   };
 }
@@ -306,6 +318,24 @@ export function diffConfigurations(
     diff.externalSync = externalSyncDiff;
   }
 
+  // Merge config diff
+  const mergeDiff: Partial<Configuration['merge']> = {};
+  if (a.merge.provider !== b.merge.provider) {
+    mergeDiff.provider = b.merge.provider;
+  }
+  if (a.merge.ciTimeoutMinutes !== b.merge.ciTimeoutMinutes) {
+    mergeDiff.ciTimeoutMinutes = b.merge.ciTimeoutMinutes;
+  }
+  if (JSON.stringify(a.merge.requiredChecks) !== JSON.stringify(b.merge.requiredChecks)) {
+    mergeDiff.requiredChecks = b.merge.requiredChecks;
+  }
+  if (a.merge.deleteBranchOnMerge !== b.merge.deleteBranchOnMerge) {
+    mergeDiff.deleteBranchOnMerge = b.merge.deleteBranchOnMerge;
+  }
+  if (Object.keys(mergeDiff).length > 0) {
+    diff.merge = mergeDiff;
+  }
+
   return diff;
 }
 
@@ -336,6 +366,10 @@ export function configurationsEqual(a: Configuration, b: Configuration): boolean
     a.externalSync.conflictStrategy === b.externalSync.conflictStrategy &&
     a.externalSync.defaultDirection === b.externalSync.defaultDirection &&
     a.externalSync.autoLink === b.externalSync.autoLink &&
-    a.externalSync.autoLinkProvider === b.externalSync.autoLinkProvider
+    a.externalSync.autoLinkProvider === b.externalSync.autoLinkProvider &&
+    a.merge.provider === b.merge.provider &&
+    a.merge.ciTimeoutMinutes === b.merge.ciTimeoutMinutes &&
+    JSON.stringify(a.merge.requiredChecks) === JSON.stringify(b.merge.requiredChecks) &&
+    a.merge.deleteBranchOnMerge === b.merge.deleteBranchOnMerge
   );
 }

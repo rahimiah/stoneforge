@@ -117,6 +117,25 @@ export interface ExternalSyncConfig {
 }
 
 /**
+ * Merge provider name
+ */
+export type MergeProvider = 'local' | 'github-pr';
+
+/**
+ * Merge automation configuration
+ */
+export interface MergeConfig {
+  /** Merge execution mode (default: 'local') */
+  provider: MergeProvider;
+  /** CI wait timeout in minutes for github-pr mode (default: 30) */
+  ciTimeoutMinutes: number;
+  /** Required check names. Empty means "all reported checks must pass". */
+  requiredChecks: string[];
+  /** Delete branch on successful merge (default: true) */
+  deleteBranchOnMerge: boolean;
+}
+
+/**
  * Valid conflict strategy values
  */
 export const VALID_CONFLICT_STRATEGIES: readonly ExternalSyncConflictStrategy[] = [
@@ -144,6 +163,14 @@ export const VALID_AUTO_LINK_PROVIDERS: readonly string[] = [
 ] as const;
 
 /**
+ * Valid merge provider values
+ */
+export const VALID_MERGE_PROVIDERS: readonly MergeProvider[] = [
+  'local',
+  'github-pr',
+] as const;
+
+/**
  * Complete Stoneforge configuration
  */
 export interface Configuration {
@@ -167,6 +194,8 @@ export interface Configuration {
   plugins: PluginsConfig;
   /** External sync settings */
   externalSync: ExternalSyncConfig;
+  /** Merge automation settings */
+  merge: MergeConfig;
 }
 
 /**
@@ -183,6 +212,7 @@ export type PartialConfiguration = {
   project?: Partial<ProjectConfigSection>;
   plugins?: Partial<PluginsConfig>;
   externalSync?: Partial<ExternalSyncConfig>;
+  merge?: Partial<MergeConfig>;
 };
 
 // ============================================================================
@@ -254,6 +284,12 @@ export interface TrackedConfiguration {
     autoLink: TrackedValue<boolean>;
     autoLinkProvider?: TrackedValue<string>;
   };
+  merge: {
+    provider: TrackedValue<MergeProvider>;
+    ciTimeoutMinutes: TrackedValue<number>;
+    requiredChecks: TrackedValue<string[]>;
+    deleteBranchOnMerge: TrackedValue<boolean>;
+  };
 }
 
 // ============================================================================
@@ -299,6 +335,12 @@ export interface YamlConfigFile {
     default_direction?: string;
     auto_link?: boolean;
     auto_link_provider?: string;
+  };
+  merge?: {
+    provider?: MergeProvider;
+    ci_timeout_minutes?: string | number;
+    required_checks?: string[];
+    delete_branch_on_merge?: boolean;
   };
 }
 
@@ -401,6 +443,10 @@ export const VALID_CONFIG_PATHS = [
   'externalSync.defaultDirection',
   'externalSync.autoLink',
   'externalSync.autoLinkProvider',
+  'merge.provider',
+  'merge.ciTimeoutMinutes',
+  'merge.requiredChecks',
+  'merge.deleteBranchOnMerge',
 ] as const;
 
 /**
@@ -440,4 +486,8 @@ export interface ConfigPathTypes {
   'externalSync.defaultDirection': SyncDirection;
   'externalSync.autoLink': boolean;
   'externalSync.autoLinkProvider': string | undefined;
+  'merge.provider': MergeProvider;
+  'merge.ciTimeoutMinutes': number;
+  'merge.requiredChecks': string[];
+  'merge.deleteBranchOnMerge': boolean;
 }

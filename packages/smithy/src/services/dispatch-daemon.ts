@@ -1000,7 +1000,7 @@ export class DispatchDaemonImpl implements DispatchDaemon {
       // Find tasks in REVIEW status that need merge processing
       const reviewTasks = await this.taskAssignment.listAssignments({
         taskStatus: [TaskStatus.REVIEW],
-        mergeStatus: ['pending'],
+        mergeStatus: ['pending', 'ci_pending'],
       });
 
       // Filter to tasks not already claimed by a steward.
@@ -1191,12 +1191,12 @@ export class DispatchDaemonImpl implements DispatchDaemon {
         if (stewardSession) continue;
 
         // Find REVIEW tasks assigned to this steward that still need processing.
-        // Only recover tasks with 'pending' or 'testing' mergeStatus - tasks with
-        // 'test_failed', 'conflict', 'failed', or 'merged' have already been processed
+        // Only recover tasks with pending merge statuses - tasks with
+        // terminal failure/success states have already been processed
         // and should NOT be re-spawned (prevents infinite retry loops on pre-existing failures).
         const stewardTasks = await this.taskAssignment.getAgentTasks(stewardId, {
           taskStatus: [TaskStatus.REVIEW],
-          mergeStatus: ['pending', 'testing'],
+          mergeStatus: ['pending', 'testing', 'ci_pending', 'ci_timeout'],
         });
         if (stewardTasks.length === 0) continue;
 
@@ -1295,7 +1295,7 @@ export class DispatchDaemonImpl implements DispatchDaemon {
       // Find tasks that are CLOSED but have a non-merged mergeStatus
       const stuckTasks = await this.taskAssignment.listAssignments({
         taskStatus: [TaskStatus.CLOSED],
-        mergeStatus: ['pending', 'testing', 'merging', 'conflict', 'test_failed', 'failed'],
+        mergeStatus: ['pending', 'testing', 'ci_pending', 'ci_failed', 'ci_timeout', 'merging', 'conflict', 'test_failed', 'failed'],
       });
 
       const now = Date.now();

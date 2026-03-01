@@ -344,6 +344,12 @@ function createTrackedDefaults(): TrackedConfiguration {
         ? { value: DEFAULT_CONFIG.externalSync.autoLinkProvider, source: ConfigSourceEnum.DEFAULT }
         : undefined,
     },
+    merge: {
+      provider: { value: DEFAULT_CONFIG.merge.provider, source: ConfigSourceEnum.DEFAULT },
+      ciTimeoutMinutes: { value: DEFAULT_CONFIG.merge.ciTimeoutMinutes, source: ConfigSourceEnum.DEFAULT },
+      requiredChecks: { value: [...DEFAULT_CONFIG.merge.requiredChecks], source: ConfigSourceEnum.DEFAULT },
+      deleteBranchOnMerge: { value: DEFAULT_CONFIG.merge.deleteBranchOnMerge, source: ConfigSourceEnum.DEFAULT },
+    },
   };
 }
 
@@ -419,6 +425,18 @@ function mergeTrackedConfig(
   }
   if (partial.externalSync?.autoLinkProvider !== undefined) {
     result.externalSync = { ...result.externalSync, autoLinkProvider: { value: partial.externalSync.autoLinkProvider, source } };
+  }
+  if (partial.merge?.provider !== undefined) {
+    result.merge = { ...result.merge, provider: { value: partial.merge.provider, source } };
+  }
+  if (partial.merge?.ciTimeoutMinutes !== undefined) {
+    result.merge = { ...result.merge, ciTimeoutMinutes: { value: partial.merge.ciTimeoutMinutes, source } };
+  }
+  if (partial.merge?.requiredChecks !== undefined) {
+    result.merge = { ...result.merge, requiredChecks: { value: partial.merge.requiredChecks, source } };
+  }
+  if (partial.merge?.deleteBranchOnMerge !== undefined) {
+    result.merge = { ...result.merge, deleteBranchOnMerge: { value: partial.merge.deleteBranchOnMerge, source } };
   }
 
   return result;

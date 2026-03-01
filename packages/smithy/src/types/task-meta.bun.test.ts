@@ -27,6 +27,9 @@ describe('MergeStatus', () => {
     expect(MergeStatusValues).toEqual([
       'pending',
       'testing',
+      'ci_pending',
+      'ci_failed',
+      'ci_timeout',
       'merging',
       'merged',
       'conflict',

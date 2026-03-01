@@ -16,6 +16,7 @@ import type { QuarryAPI } from '@stoneforge/quarry';
 
 import type { TaskAssignmentService, TaskAssignment } from './task-assignment-service.js';
 import type { DispatchService } from './dispatch-service.js';
+import type { GitHubMergeProvider } from './merge-request-provider.js';
 import type { WorktreeManager, WorktreeInfo } from '../git/worktree-manager.js';
 import type { AgentRegistry } from './agent-registry.js';
 
@@ -1328,6 +1329,169 @@ describe('MergeStewardService', () => {
       expect(result.status).toBe('skipped');
       expect(result.merged).toBe(false);
       expect(api.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('processTask (github-pr mode)', () => {
+    it('creates a PR and transitions pending -> ci_pending', async () => {
+      const githubProvider = {
+        name: 'github-pr',
+        createMergeRequest: vi.fn().mockResolvedValue({
+          url: 'https://github.com/acme/repo/pull/42',
+          id: 42,
+          provider: 'github-pr',
+        }),
+        waitForChecks: vi.fn(),
+        mergeViaPr: vi.fn(),
+      } as unknown as GitHubMergeProvider;
+
+      const githubConfig: MergeStewardConfig = {
+        ...createDefaultConfig(),
+        mergeProvider: 'github-pr',
+      };
+
+      const githubService = createMergeStewardService(
+        api,
+        taskAssignment,
+        dispatchService,
+        agentRegistry,
+        githubConfig,
+        worktreeManager,
+        undefined,
+        githubProvider
+      );
+
+      const reviewTask = createMockTask({
+        status: TaskStatus.REVIEW,
+        metadata: {
+          orchestrator: {
+            branch: 'agent/worker/task-branch',
+            mergeStatus: 'pending',
+          },
+        },
+      });
+      (api.get as MockInstance).mockResolvedValue(reviewTask);
+      (api.update as MockInstance).mockImplementation((_id, updates) =>
+        Promise.resolve({ ...reviewTask, ...updates } as Task)
+      );
+
+      const cp = await import('node:child_process');
+      (cp.exec as unknown as MockInstance).mockImplementation(
+        (cmd: string, _opts: unknown, cb?: Function) => {
+          const callback = typeof _opts === 'function' ? (_opts as unknown as Function) : cb;
+          if (!callback) return;
+          if (cmd.includes('rev-list --count')) {
+            callback(null, { stdout: '2\n', stderr: '' });
+            return;
+          }
+          if (cmd.includes('remote get-url')) {
+            callback(new Error('no remote'), { stdout: '', stderr: '' });
+            return;
+          }
+          callback(null, { stdout: '', stderr: '' });
+        }
+      );
+
+      const result = await githubService.processTask(reviewTask.id);
+
+      expect(result.status).toBe('ci_pending');
+      expect(result.merged).toBe(false);
+      expect(githubProvider.createMergeRequest).toHaveBeenCalledOnce();
+      expect(api.update).toHaveBeenCalledWith(
+        reviewTask.id,
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            orchestrator: expect.objectContaining({
+              mergeStatus: 'ci_pending',
+              mergeRequestId: 42,
+              mergeRequestUrl: 'https://github.com/acme/repo/pull/42',
+              mergeRequestProvider: 'github-pr',
+            }),
+          }),
+        })
+      );
+    });
+
+    it('creates a fix task when CI checks fail', async () => {
+      const githubProvider = {
+        name: 'github-pr',
+        createMergeRequest: vi.fn(),
+        waitForChecks: vi.fn().mockResolvedValue({
+          status: 'failed',
+          checks: [{ name: 'test-suite', conclusion: 'failure' }],
+          failingChecks: [{ name: 'test-suite', conclusion: 'failure' }],
+        }),
+        mergeViaPr: vi.fn(),
+      } as unknown as GitHubMergeProvider;
+
+      const githubConfig: MergeStewardConfig = {
+        ...createDefaultConfig(),
+        mergeProvider: 'github-pr',
+      };
+
+      const githubService = createMergeStewardService(
+        api,
+        taskAssignment,
+        dispatchService,
+        agentRegistry,
+        githubConfig,
+        worktreeManager,
+        undefined,
+        githubProvider
+      );
+
+      const reviewTask = createMockTask({
+        status: TaskStatus.REVIEW,
+        metadata: {
+          orchestrator: {
+            branch: 'agent/worker/task-branch',
+            mergeStatus: 'ci_pending',
+            mergeRequestId: 101,
+          },
+        },
+      });
+
+      (api.get as MockInstance).mockResolvedValue(reviewTask);
+      (api.list as MockInstance).mockResolvedValue([]);
+      (api.create as MockInstance).mockResolvedValue({ ...reviewTask, id: 'task-fix-001' as ElementId });
+      (api.update as MockInstance).mockImplementation((_id, updates) =>
+        Promise.resolve({ ...reviewTask, ...updates } as Task)
+      );
+      (agentRegistry.getAgentChannel as MockInstance).mockResolvedValue(undefined);
+
+      const cp = await import('node:child_process');
+      (cp.exec as unknown as MockInstance).mockImplementation(
+        (cmd: string, _opts: unknown, cb?: Function) => {
+          const callback = typeof _opts === 'function' ? (_opts as unknown as Function) : cb;
+          if (!callback) return;
+          if (cmd.includes('rev-list --count')) {
+            callback(null, { stdout: '2\n', stderr: '' });
+            return;
+          }
+          if (cmd.includes('remote get-url')) {
+            callback(new Error('no remote'), { stdout: '', stderr: '' });
+            return;
+          }
+          callback(null, { stdout: '', stderr: '' });
+        }
+      );
+
+      const result = await githubService.processTask(reviewTask.id);
+
+      expect(result.status).toBe('ci_failed');
+      expect(result.merged).toBe(false);
+      expect(result.fixTaskId).toBe('task-fix-001');
+      expect(githubProvider.waitForChecks).toHaveBeenCalledWith(101, []);
+      expect(api.update).toHaveBeenCalledWith(
+        reviewTask.id,
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            orchestrator: expect.objectContaining({
+              mergeStatus: 'ci_failed',
+            }),
+          }),
+        })
+      );
     });
   });
 

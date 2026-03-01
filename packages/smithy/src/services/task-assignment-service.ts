@@ -764,7 +764,7 @@ export class TaskAssignmentServiceImpl implements TaskAssignmentService {
       // Count awaiting merge (review status with pending merge status)
       if (task.status === TaskStatus.REVIEW) {
         const mergeStatus = orchestratorMeta?.mergeStatus;
-        if (!mergeStatus || mergeStatus === 'pending' || mergeStatus === 'testing') {
+        if (!mergeStatus || mergeStatus === 'pending' || mergeStatus === 'testing' || mergeStatus === 'ci_pending') {
           awaitingMergeCount++;
         }
       }
@@ -886,7 +886,7 @@ export class TaskAssignmentServiceImpl implements TaskAssignmentService {
   async getTasksAwaitingMerge(): Promise<TaskAssignment[]> {
     return this.listAssignments({
       taskStatus: TaskStatus.REVIEW,
-      mergeStatus: ['pending', 'testing'],
+      mergeStatus: ['pending', 'testing', 'ci_pending'],
     });
   }
 

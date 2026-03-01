@@ -64,6 +64,12 @@ interface Configuration {
     conflictStrategy: ExternalSyncConflictStrategy;  // 'last_write_wins' | 'local_wins' | 'remote_wins' | 'manual'
     defaultDirection: SyncDirection;  // 'push' | 'pull' | 'bidirectional'
   };
+  merge: {
+    provider: MergeProvider;         // 'local' | 'github-pr' (default: 'local')
+    ciTimeoutMinutes: number;        // CI wait timeout in minutes (default: 30)
+    requiredChecks: string[];        // Required check names; empty = all reported checks
+    deleteBranchOnMerge: boolean;    // Delete branch after merge (default: true)
+  };
 }
 ```
 
@@ -141,7 +147,11 @@ type ConfigPath =
   | 'externalSync.enabled'
   | 'externalSync.pollInterval'
   | 'externalSync.conflictStrategy'
-  | 'externalSync.defaultDirection';
+  | 'externalSync.defaultDirection'
+  | 'merge.provider'
+  | 'merge.ciTimeoutMinutes'
+  | 'merge.requiredChecks'
+  | 'merge.deleteBranchOnMerge';
 ```
 
 ## Modifying Configuration
@@ -243,6 +253,12 @@ external_sync:
   poll_interval: 60000     # 1 minute in ms
   conflict_strategy: last_write_wins
   default_direction: bidirectional
+
+merge:
+  provider: local             # 'local' or 'github-pr'
+  ci_timeout_minutes: 30      # CI wait timeout (github-pr mode only)
+  required_checks: []         # Required check names (empty = all checks)
+  delete_branch_on_merge: true
 ```
 
 ## Duration Strings

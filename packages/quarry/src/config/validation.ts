@@ -24,6 +24,7 @@ import {
   VALID_CONFLICT_STRATEGIES,
   VALID_SYNC_DIRECTIONS,
   VALID_AUTO_LINK_PROVIDERS,
+  VALID_MERGE_PROVIDERS,
 } from './types.js';
 // Note: ExternalSyncConflictStrategy and SyncDirection types are validated via the VALID_* arrays
 import { validateDurationRange, formatDuration } from './duration.js';
@@ -507,6 +508,51 @@ export function validateConfiguration(config: unknown): Configuration {
     }
   }
 
+  // Validate merge
+  if (typeof obj.merge !== 'object' || obj.merge === null) {
+    throw new ValidationError(
+      'Configuration must include merge object',
+      ErrorCode.INVALID_INPUT,
+      { field: 'merge' }
+    );
+  }
+  const merge = obj.merge as Record<string, unknown>;
+  if (!VALID_MERGE_PROVIDERS.includes(merge.provider as 'local' | 'github-pr')) {
+    throw new ValidationError(
+      `merge.provider must be one of: ${VALID_MERGE_PROVIDERS.join(', ')}`,
+      ErrorCode.INVALID_INPUT,
+      { field: 'merge.provider', value: merge.provider, expected: VALID_MERGE_PROVIDERS }
+    );
+  }
+  if (typeof merge.ciTimeoutMinutes !== 'number' || !Number.isFinite(merge.ciTimeoutMinutes)) {
+    throw new ValidationError(
+      'merge.ciTimeoutMinutes must be a number',
+      ErrorCode.INVALID_INPUT,
+      { field: 'merge.ciTimeoutMinutes', value: merge.ciTimeoutMinutes, expected: 'number' }
+    );
+  }
+  if (merge.ciTimeoutMinutes <= 0) {
+    throw new ValidationError(
+      'merge.ciTimeoutMinutes must be greater than 0',
+      ErrorCode.INVALID_INPUT,
+      { field: 'merge.ciTimeoutMinutes', value: merge.ciTimeoutMinutes, expected: '> 0' }
+    );
+  }
+  if (!Array.isArray(merge.requiredChecks) || !merge.requiredChecks.every((c) => typeof c === 'string')) {
+    throw new ValidationError(
+      'merge.requiredChecks must be an array of strings',
+      ErrorCode.INVALID_INPUT,
+      { field: 'merge.requiredChecks', value: merge.requiredChecks, expected: 'string[]' }
+    );
+  }
+  if (typeof merge.deleteBranchOnMerge !== 'boolean') {
+    throw new ValidationError(
+      'merge.deleteBranchOnMerge must be a boolean',
+      ErrorCode.INVALID_INPUT,
+      { field: 'merge.deleteBranchOnMerge', value: merge.deleteBranchOnMerge, expected: 'boolean' }
+    );
+  }
+
   return config as Configuration;
 }
 
@@ -624,6 +670,42 @@ export function validatePartialConfiguration(config: PartialConfiguration): void
         `externalSync.autoLinkProvider must be one of: ${VALID_AUTO_LINK_PROVIDERS.join(', ')}`,
         ErrorCode.INVALID_INPUT,
         { field: 'externalSync.autoLinkProvider', value: config.externalSync.autoLinkProvider, expected: VALID_AUTO_LINK_PROVIDERS }
+      );
+    }
+  }
+  if (config.merge?.provider !== undefined) {
+    if (!VALID_MERGE_PROVIDERS.includes(config.merge.provider)) {
+      throw new ValidationError(
+        `merge.provider must be one of: ${VALID_MERGE_PROVIDERS.join(', ')}`,
+        ErrorCode.INVALID_INPUT,
+        { field: 'merge.provider', value: config.merge.provider, expected: VALID_MERGE_PROVIDERS }
+      );
+    }
+  }
+  if (config.merge?.ciTimeoutMinutes !== undefined) {
+    if (!Number.isFinite(config.merge.ciTimeoutMinutes) || config.merge.ciTimeoutMinutes <= 0) {
+      throw new ValidationError(
+        'merge.ciTimeoutMinutes must be a number greater than 0',
+        ErrorCode.INVALID_INPUT,
+        { field: 'merge.ciTimeoutMinutes', value: config.merge.ciTimeoutMinutes, expected: '> 0' }
+      );
+    }
+  }
+  if (config.merge?.requiredChecks !== undefined) {
+    if (!Array.isArray(config.merge.requiredChecks) || !config.merge.requiredChecks.every((c) => typeof c === 'string')) {
+      throw new ValidationError(
+        'merge.requiredChecks must be an array of strings',
+        ErrorCode.INVALID_INPUT,
+        { field: 'merge.requiredChecks', value: config.merge.requiredChecks, expected: 'string[]' }
+      );
+    }
+  }
+  if (config.merge?.deleteBranchOnMerge !== undefined) {
+    if (typeof config.merge.deleteBranchOnMerge !== 'boolean') {
+      throw new ValidationError(
+        'merge.deleteBranchOnMerge must be a boolean',
+        ErrorCode.INVALID_INPUT,
+        { field: 'merge.deleteBranchOnMerge', value: config.merge.deleteBranchOnMerge, expected: 'boolean' }
       );
     }
   }

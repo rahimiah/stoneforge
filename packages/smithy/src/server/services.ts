@@ -26,6 +26,7 @@ import {
   createDispatchDaemon,
   createAgentPoolService,
   createMergeStewardService,
+  createGitHubMergeProvider,
   createDocsStewardService,
   createSettingsService,
   createMetricsService,
@@ -113,6 +114,7 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
   const api = createQuarryAPI(storageBackend);
   const orchestratorApi = createOrchestratorAPI(storageBackend);
   const agentRegistry = createAgentRegistry(api);
+  const config = loadConfig();
 
   const claudePath = getClaudePath();
   logger.info(`Using Claude CLI at: ${claudePath}`);
@@ -172,14 +174,33 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
     worktreeManager
   );
 
+  let githubMergeProvider: ReturnType<typeof createGitHubMergeProvider> | undefined;
+  if (config.merge.provider === 'github-pr') {
+    githubMergeProvider = createGitHubMergeProvider();
+    try {
+      await githubMergeProvider.assertCliReady();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`GitHub PR merge provider startup validation failed: ${message}`);
+    }
+  }
+
   // Create steward services (before executor/scheduler so they can be passed to the executor)
   const mergeStewardService = createMergeStewardService(
     api,
     taskAssignmentService,
     dispatchService,
     agentRegistry,
-    { workspaceRoot: projectRoot },
-    worktreeManager
+    {
+      workspaceRoot: projectRoot,
+      mergeProvider: config.merge.provider,
+      ciTimeoutMinutes: config.merge.ciTimeoutMinutes,
+      requiredChecks: config.merge.requiredChecks,
+      deleteBranchAfterMerge: config.merge.deleteBranchOnMerge,
+    },
+    worktreeManager,
+    undefined,
+    githubMergeProvider
   );
 
   const docsStewardService = createDocsStewardService({
@@ -240,7 +261,6 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
   // Create sync and auto-export services
   const { resolve } = await import('node:path');
   const syncService = createSyncService(storageBackend);
-  const config = loadConfig();
   const autoExportService = createAutoExportService({
     syncService,
     backend: storageBackend,

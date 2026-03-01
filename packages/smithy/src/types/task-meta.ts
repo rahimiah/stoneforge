@@ -212,6 +212,9 @@ export interface TaskSessionHistoryEntry {
 export type MergeStatus =
   | 'pending'         // Task completed, awaiting merge
   | 'testing'         // Steward is running tests on the branch
+  | 'ci_pending'      // PR created, waiting for CI checks
+  | 'ci_failed'       // CI checks failed
+  | 'ci_timeout'      // CI checks timed out
   | 'merging'         // Tests passed, merge in progress
   | 'merged'          // Successfully merged
   | 'conflict'        // Merge conflict detected
@@ -225,6 +228,9 @@ export type MergeStatus =
 export const MergeStatusValues = [
   'pending',
   'testing',
+  'ci_pending',
+  'ci_failed',
+  'ci_timeout',
   'merging',
   'merged',
   'conflict',

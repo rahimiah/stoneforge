@@ -22,6 +22,7 @@ import {
   VALID_CONFLICT_STRATEGIES,
   VALID_SYNC_DIRECTIONS,
   VALID_AUTO_LINK_PROVIDERS,
+  VALID_MERGE_PROVIDERS,
 } from './types.js';
 import { parseDurationValue } from './duration.js';
 
@@ -314,6 +315,31 @@ export function convertYamlToConfig(yamlConfig: YamlConfigFile): PartialConfigur
     }
   }
 
+  // Merge section
+  if (yamlConfig.merge) {
+    result.merge = {};
+    if (yamlConfig.merge.provider !== undefined) {
+      const provider = yamlConfig.merge.provider;
+      if (!VALID_MERGE_PROVIDERS.includes(provider)) {
+        throw new ValidationError(
+          `Invalid merge provider: '${provider}'. Must be one of: ${VALID_MERGE_PROVIDERS.join(', ')}`,
+          ErrorCode.INVALID_INPUT,
+          { field: 'merge.provider', value: provider }
+        );
+      }
+      result.merge.provider = provider;
+    }
+    if (yamlConfig.merge.ci_timeout_minutes !== undefined) {
+      result.merge.ciTimeoutMinutes = Number(yamlConfig.merge.ci_timeout_minutes);
+    }
+    if (yamlConfig.merge.required_checks !== undefined) {
+      result.merge.requiredChecks = yamlConfig.merge.required_checks;
+    }
+    if (yamlConfig.merge.delete_branch_on_merge !== undefined) {
+      result.merge.deleteBranchOnMerge = yamlConfig.merge.delete_branch_on_merge;
+    }
+  }
+
   return result;
 }
 
@@ -458,6 +484,26 @@ export function convertConfigToYaml(config: Configuration | PartialConfiguration
     }
   }
 
+  // Merge section
+  if (config.merge) {
+    const merge: NonNullable<YamlConfigFile['merge']> = {};
+    if (config.merge.provider !== undefined) {
+      merge.provider = config.merge.provider;
+    }
+    if (config.merge.ciTimeoutMinutes !== undefined) {
+      merge.ci_timeout_minutes = config.merge.ciTimeoutMinutes;
+    }
+    if (config.merge.requiredChecks !== undefined) {
+      merge.required_checks = config.merge.requiredChecks;
+    }
+    if (config.merge.deleteBranchOnMerge !== undefined) {
+      merge.delete_branch_on_merge = config.merge.deleteBranchOnMerge;
+    }
+    if (Object.keys(merge).length > 0) {
+      result.merge = merge;
+    }
+  }
+
   return result;
 }
 
@@ -519,6 +565,7 @@ export function updateConfigFile(
     identity: updates.identity ? { ...existing.identity, ...updates.identity } : existing.identity,
     project: updates.project ? { ...existing.project, ...updates.project } : existing.project,
     externalSync: updates.externalSync ? { ...existing.externalSync, ...updates.externalSync } : existing.externalSync,
+    merge: updates.merge ? { ...existing.merge, ...updates.merge } : existing.merge,
   };
 
   writeConfigFile(filePath, merged);

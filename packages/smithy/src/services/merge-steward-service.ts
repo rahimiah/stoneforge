@@ -39,6 +39,7 @@ import {
 } from '../types/index.js';
 import type { TaskAssignmentService, TaskAssignment } from './task-assignment-service.js';
 import type { DispatchService } from './dispatch-service.js';
+import type { GitHubMergeProvider } from './merge-request-provider.js';
 import type { WorktreeManager } from '../git/worktree-manager.js';
 import { mergeBranch, syncLocalBranch, hasRemote, detectTargetBranch } from '../git/merge.js';
 import type { AgentRegistry } from './agent-registry.js';
@@ -103,6 +104,12 @@ export interface MergeStewardConfig {
   readonly mergeStrategy?: MergeStrategy;
   /** Whether to auto-push to remote after successful merge (defaults to true) */
   readonly autoPushAfterMerge?: boolean;
+  /** Merge provider mode (defaults to 'local') */
+  readonly mergeProvider?: 'local' | 'github-pr';
+  /** CI timeout for github-pr mode, in minutes (defaults to 30) */
+  readonly ciTimeoutMinutes?: number;
+  /** Required check names for github-pr mode (defaults to all checks) */
+  readonly requiredChecks?: readonly string[];
 }
 
 /**
@@ -351,6 +358,9 @@ const DEFAULT_CONFIG = {
   deleteBranchAfterMerge: true,
   mergeStrategy: 'squash' as MergeStrategy,
   autoPushAfterMerge: true,
+  mergeProvider: 'local' as const,
+  ciTimeoutMinutes: 30,
+  requiredChecks: [] as readonly string[],
 } as const;
 
 /**
@@ -365,6 +375,7 @@ export class MergeStewardServiceImpl implements MergeStewardService {
   private readonly worktreeManager: WorktreeManager | undefined;
   private readonly agentRegistry: AgentRegistry;
   private readonly operationLog: OperationLogService | undefined;
+  private readonly githubMergeProvider: GitHubMergeProvider | undefined;
   private targetBranch: string | undefined;
 
   constructor(
@@ -374,7 +385,8 @@ export class MergeStewardServiceImpl implements MergeStewardService {
     agentRegistry: AgentRegistry,
     config: MergeStewardConfig,
     worktreeManager?: WorktreeManager,
-    operationLog?: OperationLogService
+    operationLog?: OperationLogService,
+    githubMergeProvider?: GitHubMergeProvider
   ) {
     this.api = api;
     this.taskAssignment = taskAssignment;
@@ -382,6 +394,7 @@ export class MergeStewardServiceImpl implements MergeStewardService {
     this.agentRegistry = agentRegistry;
     this.worktreeManager = worktreeManager;
     this.operationLog = operationLog;
+    this.githubMergeProvider = githubMergeProvider;
     this.config = {
       ...DEFAULT_CONFIG,
       ...config,
@@ -461,6 +474,12 @@ export class MergeStewardServiceImpl implements MergeStewardService {
           merged: false,
           processedAt,
         };
+      }
+
+      const currentMergeStatus = orchestratorMeta.mergeStatus ?? 'pending';
+
+      if (this.config.mergeProvider === 'github-pr') {
+        return this.processGithubPrTask(task, orchestratorMeta, currentMergeStatus, processedAt);
       }
 
       // 2. Run tests (unless skipped)
@@ -645,6 +664,206 @@ export class MergeStewardServiceImpl implements MergeStewardService {
     }
   }
 
+  private async processGithubPrTask(
+    task: Task,
+    orchestratorMeta: OrchestratorTaskMeta,
+    currentMergeStatus: MergeStatus,
+    processedAt: Timestamp
+  ): Promise<MergeProcessResult> {
+    const taskId = task.id;
+
+    if (!this.githubMergeProvider) {
+      const error = 'merge.provider is github-pr but no GitHub merge provider is configured';
+      await this.updateMergeStatus(taskId, 'failed', { failureReason: error });
+      return { taskId, status: 'failed', merged: false, error, processedAt };
+    }
+
+    if (currentMergeStatus === 'pending') {
+      let claimedTask: Task | undefined;
+      try {
+        claimedTask = await this.updateMergeStatus(taskId, 'ci_pending', undefined, 'pending');
+      } catch (error) {
+        if (error instanceof MergeStatusConflictError) {
+          return { taskId, status: 'skipped', merged: false, processedAt };
+        }
+        throw error;
+      }
+
+      if (!claimedTask) {
+        throw new Error(`Failed to claim task ${taskId} for CI polling`);
+      }
+
+      const mergeRequest = await this.ensureMergeRequest(task, orchestratorMeta);
+      await this.persistMergeRequest(claimedTask, mergeRequest.url, mergeRequest.id);
+      return {
+        taskId,
+        status: 'ci_pending',
+        merged: false,
+        processedAt,
+      };
+    }
+
+    if (currentMergeStatus !== 'ci_pending' && currentMergeStatus !== 'ci_timeout') {
+      return {
+        taskId,
+        status: 'skipped',
+        merged: false,
+        processedAt,
+      };
+    }
+
+    const { identifier, id } = await this.getMergeRequestIdentifier(task, orchestratorMeta);
+    const checksResult = await this.githubMergeProvider.waitForChecks(
+      identifier,
+      this.config.requiredChecks
+    );
+
+    if (checksResult.status === 'pending') {
+      const timeoutReason = this.getCiTimeoutReason(task, orchestratorMeta);
+      if (timeoutReason) {
+        this.operationLog?.write('warn', 'merge', timeoutReason, { taskId });
+        await this.updateMergeStatus(taskId, 'ci_pending', { failureReason: timeoutReason });
+      }
+      return {
+        taskId,
+        status: 'ci_pending',
+        merged: false,
+        processedAt,
+      };
+    }
+
+    if (checksResult.status === 'failed') {
+      const failingNames = checksResult.failingChecks
+        .map((check) => `${check.name} (${check.conclusion ?? check.state ?? 'unknown'})`)
+        .join(', ');
+      const errorDetails = `CI checks failed: ${failingNames || 'unknown check failures'}`;
+      await this.updateMergeStatus(taskId, 'ci_failed', { failureReason: errorDetails });
+      const fixTaskId = await this.createFixTask(taskId, {
+        type: 'test_failure',
+        errorDetails,
+      });
+
+      return {
+        taskId,
+        status: 'ci_failed',
+        merged: false,
+        fixTaskId,
+        error: errorDetails,
+        processedAt,
+      };
+    }
+
+    try {
+      await this.updateMergeStatus(taskId, 'merging', undefined, 'ci_pending');
+    } catch (error) {
+      if (error instanceof MergeStatusConflictError) {
+        return { taskId, status: 'skipped', merged: false, processedAt };
+      }
+      throw error;
+    }
+
+    await this.githubMergeProvider.mergeViaPr(id, {
+      deleteBranch: this.config.deleteBranchAfterMerge,
+    });
+    await this.updateMergeStatus(taskId, 'merged');
+
+    if (this.config.autoCleanup) {
+      await this.cleanupAfterMerge(taskId, this.config.deleteBranchAfterMerge);
+    }
+
+    return {
+      taskId,
+      status: 'merged',
+      merged: true,
+      processedAt,
+    };
+  }
+
+  private async ensureMergeRequest(
+    task: Task,
+    orchestratorMeta: OrchestratorTaskMeta
+  ): Promise<{ url?: string; id?: number; provider: string }> {
+    if (orchestratorMeta.mergeRequestId || orchestratorMeta.mergeRequestUrl) {
+      return {
+        id: orchestratorMeta.mergeRequestId,
+        url: orchestratorMeta.mergeRequestUrl,
+        provider: orchestratorMeta.mergeRequestProvider ?? this.githubMergeProvider?.name ?? 'github-pr',
+      };
+    }
+
+    const sourceBranch = orchestratorMeta.branch;
+    if (!sourceBranch) {
+      throw new Error(`Task ${task.id} has no branch associated`);
+    }
+
+    const targetBranch = await this.getTargetBranch();
+    const body = this.buildDefaultPrBody(task, orchestratorMeta.completionSummary);
+    return this.githubMergeProvider!.createMergeRequest(task, {
+      title: task.title,
+      body,
+      sourceBranch,
+      targetBranch,
+    });
+  }
+
+  private async persistMergeRequest(task: Task, url?: string, id?: number): Promise<void> {
+    const metadata = updateOrchestratorTaskMeta(
+      task.metadata as Record<string, unknown>,
+      {
+        mergeRequestUrl: url,
+        mergeRequestId: id,
+        mergeRequestProvider: this.githubMergeProvider?.name,
+      }
+    );
+
+    await this.api.update<Task>(task.id, { metadata });
+  }
+
+  private async getMergeRequestIdentifier(
+    task: Task,
+    orchestratorMeta: OrchestratorTaskMeta
+  ): Promise<{ identifier: string | number; id: number | string }> {
+    const mergeRequest = await this.ensureMergeRequest(task, orchestratorMeta);
+    await this.persistMergeRequest(task, mergeRequest.url, mergeRequest.id);
+
+    if (mergeRequest.id !== undefined) {
+      return { identifier: mergeRequest.id, id: mergeRequest.id };
+    }
+    if (mergeRequest.url) {
+      return { identifier: mergeRequest.url, id: mergeRequest.url };
+    }
+
+    throw new Error(`Task ${task.id} has no merge request identifier`);
+  }
+
+  private getCiTimeoutReason(task: Task, orchestratorMeta: OrchestratorTaskMeta): string | undefined {
+    const timeoutMs = this.config.ciTimeoutMinutes * 60 * 1000;
+    const completedAt = orchestratorMeta.completedAt ?? task.updatedAt;
+    const startedAtMs = Date.parse(completedAt);
+    if (Number.isNaN(startedAtMs)) {
+      return undefined;
+    }
+    if (Date.now() - startedAtMs < timeoutMs) {
+      return undefined;
+    }
+    return `CI checks timed out after ${this.config.ciTimeoutMinutes} minutes; task remains in ci_pending`;
+  }
+
+  private buildDefaultPrBody(task: Task, summary?: string): string {
+    const lines = [
+      '## Task',
+      '',
+      `**ID:** ${task.id}`,
+      `**Title:** ${task.title}`,
+      '',
+    ];
+    if (summary) {
+      lines.push('## Summary', '', summary, '');
+    }
+    lines.push('---', '_Created by Stoneforge Smithy_');
+    return lines.join('\n');
+  }
+
   async processAllPending(
     options: ProcessTaskOptions = {}
   ): Promise<BatchProcessResult> {
@@ -666,6 +885,7 @@ export class MergeStewardServiceImpl implements MergeStewardService {
           mergedCount++;
           break;
         case 'test_failed':
+        case 'ci_failed':
           testFailedCount++;
           break;
         case 'conflict':
@@ -1139,7 +1359,8 @@ export function createMergeStewardService(
   agentRegistry: AgentRegistry,
   config: MergeStewardConfig,
   worktreeManager?: WorktreeManager,
-  operationLog?: OperationLogService
+  operationLog?: OperationLogService,
+  githubMergeProvider?: GitHubMergeProvider
 ): MergeStewardService {
   return new MergeStewardServiceImpl(
     api,
@@ -1148,6 +1369,7 @@ export function createMergeStewardService(
     agentRegistry,
     config,
     worktreeManager,
-    operationLog
+    operationLog,
+    githubMergeProvider
   );
 }
