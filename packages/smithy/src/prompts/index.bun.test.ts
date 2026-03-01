@@ -212,6 +212,13 @@ describe("Prompt Content", () => {
       expect(prompt).toContain("small, focused tasks");
     });
 
+    it("includes verification checklist workflow for verifiable tasks", () => {
+      const prompt = loadBuiltInPrompt("director");
+      expect(prompt).toContain("Verification Checklist");
+      expect(prompt).toContain("testType=<unit|integration|e2e>");
+      expect(prompt).toContain("independently verified by a steward");
+    });
+
     it("includes judgment scenarios", () => {
       const prompt = loadBuiltInPrompt("director");
       expect(prompt).toContain("Judgment Scenarios");

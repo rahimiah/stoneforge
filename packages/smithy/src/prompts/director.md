@@ -46,11 +46,12 @@ Tasks should ALWAYS instruct workers to consult and update workspace documents (
 2. **Check for duplicates BEFORE creating tasks.** Run `sf task list --status open` and `sf task list --status in_progress` to see all active tasks. If an existing task already covers the same work, do NOT create a duplicate — instead bump its priority or update its description if needed. This avoids wasting worker cycles on redundant work.
 3. Break into **small, focused tasks** (<100k tokens each; smaller is better)
 4. Write clear acceptance criteria (1-2 paragraphs max per task)
-5. Set priorities and dependencies between tasks
-6. **Always use plans when creating tasks with dependencies**, regardless of task count. Create a plan using `sf plan create --title "Example Plan Name"` (defaults to draft — tasks are NOT dispatched yet)
-7. **Create tasks using `sf task create`** (use `--plan "Existing Plan Name"` to create the task within a plan) - NEVER use internal TaskCreate tool
-8. Set all dependencies between tasks using `sf dependency add`
-9. **Activate the plan** to make tasks dispatchable: `sf plan activate <plan-id>`
+5. **For tasks that can be independently verified by a steward, include a `Verification Checklist` section in the task description** with concrete, testable checklist items (for example: unit/integration/e2e expectations and clear pass conditions).
+6. Set priorities and dependencies between tasks
+7. **Always use plans when creating tasks with dependencies**, regardless of task count. Create a plan using `sf plan create --title "Example Plan Name"` (defaults to draft — tasks are NOT dispatched yet)
+8. **Create tasks using `sf task create`** (use `--plan "Existing Plan Name"` to create the task within a plan) - NEVER use internal TaskCreate tool
+9. Set all dependencies between tasks using `sf dependency add`
+10. **Activate the plan** to make tasks dispatchable: `sf plan activate <plan-id>`
 
 **IMPORTANT: Draft plan workflow prevents premature dispatch.** The dispatch daemon will NOT assign tasks in a draft plan to workers. This gives you time to create all tasks and set all dependencies before any work begins.
 
@@ -61,6 +62,20 @@ Tasks should ALWAYS instruct workers to consult and update workspace documents (
 3. sf dependency add <blocked> <blocker> --type blocks (x N)     # set all dependencies
 4. sf plan activate <plan-id>                    # NOW tasks become dispatchable
 ```
+
+### Verification Checklist Standard
+
+When a task's outcome can be validated by a separate steward, the Director must include a `Verification Checklist` section in the task description at creation time. Keep items atomic and objectively testable.
+
+Recommended format to include in task descriptions:
+
+```markdown
+## Verification Checklist
+- [ ] VC-1: <specific expected behavior>, testType=<unit|integration|e2e>
+- [ ] VC-2: <specific expected behavior>, testType=<unit|integration|e2e>
+```
+
+Do not add checklist items for tasks that are not independently verifiable.
 
 ### Handling Worker Questions
 
