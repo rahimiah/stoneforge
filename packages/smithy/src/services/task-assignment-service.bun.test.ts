@@ -12,11 +12,14 @@ import { createQuarryAPI, type QuarryAPI } from '@stoneforge/quarry';
 import {
   createEntity,
   createTask,
+  createDocument,
   EntityTypeValue,
   TaskStatus,
   type EntityId,
   type Task,
   type ElementId,
+  type Document,
+  type DocumentId,
 } from '@stoneforge/core';
 import {
   createTaskAssignmentService,
@@ -86,6 +89,32 @@ describe('TaskAssignmentService', () => {
       createdBy: systemEntity,
       maxConcurrentTasks,
     });
+  }
+
+  // Helper function to create a task with a description document
+  async function createTestTaskWithDescription(
+    title: string,
+    descriptionContent: string,
+    status?: typeof TaskStatus[keyof typeof TaskStatus]
+  ): Promise<{ task: Task; descDoc: Document }> {
+    // Create the description document first
+    const doc = await createDocument({
+      title: `Description for ${title}`,
+      content: descriptionContent,
+      createdBy: systemEntity,
+    });
+    const savedDoc = await api.create(doc as unknown as Record<string, unknown> & { createdBy: EntityId }) as Document;
+
+    // Create the task with a reference to the description document
+    const task = await createTask({
+      title,
+      createdBy: systemEntity,
+      status: status ?? TaskStatus.OPEN,
+      descriptionRef: savedDoc.id as DocumentId,
+    });
+    const savedTask = await api.create(task as unknown as Record<string, unknown> & { createdBy: EntityId }) as Task;
+
+    return { task: savedTask, descDoc: savedDoc };
   }
 
   describe('AssignmentStatusValues', () => {
@@ -471,6 +500,130 @@ describe('TaskAssignmentService', () => {
       const handoffMeta = getOrchestratorTaskMeta(handedOff.metadata as Record<string, unknown>);
       expect(handoffMeta?.mergeStatus).toBeUndefined();
       expect(handoffMeta?.handoffHistory?.[0]?.message).toBe('Tests failed, worker needs to fix issues');
+    });
+
+    test('appends handoff note to task description document', async () => {
+      const originalDescription = 'This is the original task description.';
+      const { task, descDoc } = await createTestTaskWithDescription(
+        'Task with description',
+        originalDescription,
+        TaskStatus.IN_PROGRESS
+      );
+      const worker = await createTestWorker('desc-worker');
+      const agentId = worker.id as unknown as EntityId;
+
+      await service.assignToAgent(task.id, agentId, { markAsStarted: true });
+
+      // Handoff with message
+      await service.handoffTask(task.id, {
+        sessionId: 'sess-desc-1',
+        message: 'First handoff note',
+      });
+
+      // Check that description document was updated
+      const updatedDoc = await api.get<Document>(descDoc.id);
+      expect(updatedDoc?.content).toContain(originalDescription);
+      expect(updatedDoc?.content).toContain('[AGENT HANDOFF NOTE]: First handoff note');
+    });
+
+    test('truncates description to keep only last 3 handoff notes', async () => {
+      const originalDescription = 'Original task description content.';
+      const { task, descDoc } = await createTestTaskWithDescription(
+        'Task with many handoffs',
+        originalDescription,
+        TaskStatus.IN_PROGRESS
+      );
+
+      // Perform 5 handoffs to trigger truncation (only last 3 should remain visible)
+      for (let i = 1; i <= 5; i++) {
+        const worker = await createTestWorker(`handoff-worker-${i}`);
+        const agentId = worker.id as unknown as EntityId;
+        await service.assignToAgent(task.id, agentId, { markAsStarted: true });
+        await service.handoffTask(task.id, {
+          sessionId: `sess-${i}`,
+          message: `Handoff note ${i}`,
+        });
+      }
+
+      // Check the final description document
+      const updatedDoc = await api.get<Document>(descDoc.id);
+      const content = updatedDoc?.content ?? '';
+
+      // Original description should be preserved
+      expect(content).toContain(originalDescription);
+
+      // Should show archive summary for notes 1 and 2
+      expect(content).toContain('[2 earlier handoff note(s) archived');
+
+      // Should NOT contain the first two handoff notes
+      expect(content).not.toContain('Handoff note 1');
+      expect(content).not.toContain('Handoff note 2');
+
+      // Should contain the last 3 handoff notes
+      expect(content).toContain('Handoff note 3');
+      expect(content).toContain('Handoff note 4');
+      expect(content).toContain('Handoff note 5');
+    });
+
+    test('preserves original description without handoff marker', async () => {
+      const originalDescription = 'This description has no [AGENT HANDOFF NOTE] markers.';
+      const { task, descDoc } = await createTestTaskWithDescription(
+        'Fresh task',
+        originalDescription,
+        TaskStatus.IN_PROGRESS
+      );
+      const worker = await createTestWorker('fresh-worker');
+      const agentId = worker.id as unknown as EntityId;
+
+      await service.assignToAgent(task.id, agentId, { markAsStarted: true });
+      await service.handoffTask(task.id, {
+        sessionId: 'sess-fresh',
+        message: 'First note on fresh task',
+      });
+
+      const updatedDoc = await api.get<Document>(descDoc.id);
+      const content = updatedDoc?.content ?? '';
+
+      // Original description should be at the start
+      expect(content.startsWith(originalDescription)).toBe(true);
+
+      // Should contain the handoff note after original
+      expect(content).toContain('[AGENT HANDOFF NOTE]: First note on fresh task');
+
+      // No archive summary should appear (only 1 note)
+      expect(content).not.toContain('archived');
+    });
+
+    test('handoff history in metadata keeps all notes even when description is truncated', async () => {
+      const { task } = await createTestTaskWithDescription(
+        'Task for history check',
+        'Original description',
+        TaskStatus.IN_PROGRESS
+      );
+
+      // Perform 5 handoffs
+      for (let i = 1; i <= 5; i++) {
+        const worker = await createTestWorker(`history-worker-${i}`);
+        const agentId = worker.id as unknown as EntityId;
+        await service.assignToAgent(task.id, agentId, { markAsStarted: true });
+        await service.handoffTask(task.id, {
+          sessionId: `history-sess-${i}`,
+          message: `History note ${i}`,
+        });
+      }
+
+      // Get the final task and check handoffHistory metadata
+      const finalTask = await api.get<Task>(task.id);
+      const meta = getOrchestratorTaskMeta(finalTask?.metadata as Record<string, unknown>);
+      const history = meta?.handoffHistory ?? [];
+
+      // All 5 handoff notes should be in the metadata history
+      expect(history.length).toBe(5);
+      expect(history[0].message).toBe('History note 1');
+      expect(history[1].message).toBe('History note 2');
+      expect(history[2].message).toBe('History note 3');
+      expect(history[3].message).toBe('History note 4');
+      expect(history[4].message).toBe('History note 5');
     });
   });
 

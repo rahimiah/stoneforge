@@ -618,13 +618,47 @@ export class TaskAssignmentServiceImpl implements TaskAssignmentService {
     const handoffHistory = [...(existingHistory || []), handoffEntry];
 
     // Append handoff note to the task's description Document
+    // Keep only last 3 handoff notes to avoid unbounded growth; full history is in handoffHistory metadata
     if (task.descriptionRef && message) {
       try {
         const doc = await this.api.get<Document>(asElementId(task.descriptionRef));
         if (doc) {
-          const handoffLine = `\n\n[AGENT HANDOFF NOTE]: ${message}`;
+          const HANDOFF_MARKER = '[AGENT HANDOFF NOTE]:';
+          const MAX_VISIBLE_NOTES = 3;
+
+          // Split content into original description and handoff notes
+          const firstMarkerIndex = doc.content.indexOf(HANDOFF_MARKER);
+          const originalDescription = firstMarkerIndex === -1
+            ? doc.content
+            : doc.content.substring(0, firstMarkerIndex).trimEnd();
+
+          // Extract existing handoff notes as an array
+          const handoffSection = firstMarkerIndex === -1
+            ? ''
+            : doc.content.substring(firstMarkerIndex);
+          const existingNotes = handoffSection
+            .split(new RegExp(`(?=\\[AGENT HANDOFF NOTE\\]:)`))
+            .filter(note => note.trim().startsWith(HANDOFF_MARKER));
+
+          // Add the new note
+          const newNote = `${HANDOFF_MARKER} ${message}`;
+          const allNotes = [...existingNotes, newNote];
+
+          // Keep only the last MAX_VISIBLE_NOTES
+          const archivedCount = Math.max(0, allNotes.length - MAX_VISIBLE_NOTES);
+          const visibleNotes = allNotes.slice(-MAX_VISIBLE_NOTES);
+
+          // Build the new content
+          let newContent = originalDescription;
+          if (archivedCount > 0) {
+            newContent += `\n\n[${archivedCount} earlier handoff note(s) archived — see task metadata for full history]`;
+          }
+          for (const note of visibleNotes) {
+            newContent += `\n\n${note.trim()}`;
+          }
+
           await this.api.update<Document>(asElementId(task.descriptionRef), {
-            content: doc.content + handoffLine,
+            content: newContent,
           } as Partial<Document>);
         }
       } catch {
