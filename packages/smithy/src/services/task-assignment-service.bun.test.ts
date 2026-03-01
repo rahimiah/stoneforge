@@ -377,6 +377,52 @@ describe('TaskAssignmentService', () => {
       expect(history[1].message).toBe('Second handoff note');
     });
 
+    test('auto-defers and tags task when handoff count reaches default limit', async () => {
+      const task = await createTestTask('Handoff loop task', TaskStatus.IN_PROGRESS);
+      const worker1 = await createTestWorker('worker-a');
+      const worker2 = await createTestWorker('worker-b');
+      const worker3 = await createTestWorker('worker-c');
+
+      await service.assignToAgent(task.id, worker1.id as unknown as EntityId, { markAsStarted: true });
+      await service.handoffTask(task.id, { sessionId: 'sess-1', message: 'handoff 1' });
+
+      await service.assignToAgent(task.id, worker2.id as unknown as EntityId, { markAsStarted: true });
+      await service.handoffTask(task.id, { sessionId: 'sess-2', message: 'handoff 2' });
+
+      await service.assignToAgent(task.id, worker3.id as unknown as EntityId, { markAsStarted: true });
+      const thirdHandoff = await service.handoffTask(task.id, { sessionId: 'sess-3', message: 'handoff 3' });
+
+      expect(thirdHandoff.status).toBe(TaskStatus.DEFERRED);
+      expect(thirdHandoff.tags).toContain('handoff-loop');
+
+      const meta = getOrchestratorTaskMeta(thirdHandoff.metadata as Record<string, unknown>);
+      expect(meta?.handoffHistory?.length).toBe(3);
+      expect(meta?.handoffHistory?.[2]?.sessionId).toBe('sess-3');
+    });
+
+    test('supports per-handoff override for max handoffs before defer', async () => {
+      const task = await createTestTask('Custom handoff limit task', TaskStatus.IN_PROGRESS);
+      const worker1 = await createTestWorker('worker-x');
+      const worker2 = await createTestWorker('worker-y');
+
+      await service.assignToAgent(task.id, worker1.id as unknown as EntityId, { markAsStarted: true });
+      await service.handoffTask(task.id, {
+        sessionId: 'sess-a',
+        message: 'handoff a',
+        maxHandoffsBeforeDefer: 2,
+      });
+
+      await service.assignToAgent(task.id, worker2.id as unknown as EntityId, { markAsStarted: true });
+      const secondHandoff = await service.handoffTask(task.id, {
+        sessionId: 'sess-b',
+        message: 'handoff b',
+        maxHandoffsBeforeDefer: 2,
+      });
+
+      expect(secondHandoff.status).toBe(TaskStatus.DEFERRED);
+      expect(secondHandoff.tags).toContain('handoff-loop');
+    });
+
     test('throws error when task does not exist', async () => {
       expect(
         service.handoffTask('el-nonexistent' as ElementId, { sessionId: 'sess-1' })

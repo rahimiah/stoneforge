@@ -204,6 +204,12 @@ export interface DispatchDaemonConfig {
   readonly maxResumeAttemptsBeforeRecovery?: number;
 
   /**
+   * Maximum number of handoffs before a task is auto-deferred with a
+   * `handoff-loop` tag. Default: 3.
+   */
+  readonly maxHandoffsBeforeDefer?: number;
+
+  /**
    * Maximum session duration in ms before the daemon terminates it.
    * Prevents stuck workers from blocking their slot indefinitely.
    * Default: 0 (disabled).
@@ -280,6 +286,7 @@ interface NormalizedConfig {
   stuckMergeRecoveryEnabled: boolean;
   stuckMergeRecoveryGracePeriodMs: number;
   maxResumeAttemptsBeforeRecovery: number;
+  maxHandoffsBeforeDefer: number;
   maxSessionDurationMs: number;
   maxStewardSessionDurationMs: number;
   onSessionStarted?: OnSessionStartedCallback;
@@ -504,6 +511,12 @@ export class DispatchDaemonImpl implements DispatchDaemon {
    */
   private cachedTargetBranch: string | undefined;
 
+  private static hasHandoffLimitConfig(
+    service: TaskAssignmentService
+  ): service is TaskAssignmentService & { setMaxHandoffsBeforeDefer: (maxHandoffsBeforeDefer: number) => void } {
+    return typeof service.setMaxHandoffsBeforeDefer === 'function';
+  }
+
   constructor(
     api: QuarryAPI,
     agentRegistry: AgentRegistry,
@@ -532,6 +545,7 @@ export class DispatchDaemonImpl implements DispatchDaemon {
     this.rateLimitTracker = createRateLimitTracker(settingsService);
     this.emitter = new EventEmitter();
     this.config = this.normalizeConfig(config);
+    this.applyTaskAssignmentConfig(this.config);
   }
 
   // ----------------------------------------
@@ -1568,6 +1582,7 @@ export class DispatchDaemonImpl implements DispatchDaemon {
   updateConfig(config: Partial<DispatchDaemonConfig>): void {
     const oldPollIntervalMs = this.config.pollIntervalMs;
     this.config = this.normalizeConfig({ ...this.config, ...config });
+    this.applyTaskAssignmentConfig(this.config);
 
     if (this.running && this.config.pollIntervalMs !== oldPollIntervalMs) {
       if (this.pollIntervalHandle) {
@@ -1631,6 +1646,7 @@ export class DispatchDaemonImpl implements DispatchDaemon {
       stuckMergeRecoveryEnabled: config?.stuckMergeRecoveryEnabled ?? true,
       stuckMergeRecoveryGracePeriodMs: config?.stuckMergeRecoveryGracePeriodMs ?? 600_000,
       maxResumeAttemptsBeforeRecovery: config?.maxResumeAttemptsBeforeRecovery ?? 3,
+      maxHandoffsBeforeDefer: Math.max(1, config?.maxHandoffsBeforeDefer ?? 3),
       maxSessionDurationMs: config?.maxSessionDurationMs ?? 0,
       maxStewardSessionDurationMs: config?.maxStewardSessionDurationMs ?? 30 * 60 * 1000,
       onSessionStarted: config?.onSessionStarted,
@@ -1638,6 +1654,12 @@ export class DispatchDaemonImpl implements DispatchDaemon {
       directorInboxForwardingEnabled: config?.directorInboxForwardingEnabled ?? true,
       directorInboxIdleThresholdMs: config?.directorInboxIdleThresholdMs ?? 120_000,
     };
+  }
+
+  private applyTaskAssignmentConfig(config: NormalizedConfig): void {
+    if (DispatchDaemonImpl.hasHandoffLimitConfig(this.taskAssignment)) {
+      this.taskAssignment.setMaxHandoffsBeforeDefer(config.maxHandoffsBeforeDefer);
+    }
   }
 
   /**

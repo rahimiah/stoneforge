@@ -88,6 +88,8 @@ export interface HandoffTaskOptions {
   branch?: string;
   /** Override worktree path (defaults to current task worktree) */
   worktree?: string;
+  /** Override max handoffs allowed before auto-deferring the task */
+  maxHandoffsBeforeDefer?: number;
 }
 
 /**
@@ -255,6 +257,13 @@ export interface TaskAssignmentService {
   handoffTask(taskId: ElementId, options: HandoffTaskOptions): Promise<Task>;
 
   /**
+   * Updates the max number of handoffs allowed before auto-deferring tasks.
+   *
+   * @param maxHandoffsBeforeDefer - Maximum handoffs before defer (minimum 1)
+   */
+  setMaxHandoffsBeforeDefer?(maxHandoffsBeforeDefer: number): void;
+
+  /**
    * Updates the session ID for a task.
    *
    * @param taskId - The task to update
@@ -347,10 +356,16 @@ export interface TaskAssignmentService {
 export class TaskAssignmentServiceImpl implements TaskAssignmentService {
   private readonly api: QuarryAPI;
   private readonly mergeRequestProvider?: MergeRequestProvider;
+  private maxHandoffsBeforeDefer: number;
 
-  constructor(api: QuarryAPI, mergeRequestProvider?: MergeRequestProvider) {
+  constructor(
+    api: QuarryAPI,
+    mergeRequestProvider?: MergeRequestProvider,
+    maxHandoffsBeforeDefer: number = 3
+  ) {
     this.api = api;
     this.mergeRequestProvider = mergeRequestProvider;
+    this.maxHandoffsBeforeDefer = Math.max(1, maxHandoffsBeforeDefer);
   }
 
   // ----------------------------------------
@@ -587,6 +602,11 @@ export class TaskAssignmentServiceImpl implements TaskAssignmentService {
 
     // Build handoff history (append to existing history)
     const existingHistory = (currentMeta as Record<string, unknown> | undefined)?.handoffHistory as HandoffHistoryEntry[] | undefined;
+    const effectiveMaxHandoffsBeforeDefer = Math.max(
+      1,
+      options.maxHandoffsBeforeDefer ?? this.maxHandoffsBeforeDefer
+    );
+    const currentHandoffCount = existingHistory?.length ?? 0;
     const handoffEntry: HandoffHistoryEntry = {
       sessionId,
       message,
@@ -594,6 +614,7 @@ export class TaskAssignmentServiceImpl implements TaskAssignmentService {
       worktree: handoffWorktree,
       handoffAt: createTimestamp(),
     };
+    const shouldDeferForHandoffLoop = currentHandoffCount + 1 >= effectiveMaxHandoffsBeforeDefer;
     const handoffHistory = [...(existingHistory || []), handoffEntry];
 
     // Append handoff note to the task's description Document
@@ -625,7 +646,7 @@ export class TaskAssignmentServiceImpl implements TaskAssignmentService {
       lastSessionId: sessionId,
       handoffAt: createTimestamp(),
       handoffHistory,
-      // Reset resume count on status change (handoff resets to OPEN)
+      // Reset resume count on status change (handoff resets to OPEN/DEFERRED)
       resumeCount: 0,
     };
 
@@ -635,14 +656,21 @@ export class TaskAssignmentServiceImpl implements TaskAssignmentService {
       metaUpdates as Partial<OrchestratorTaskMeta>
     );
 
-    // Update task: clear assignee, reset status to OPEN, update metadata
+    // Update task: clear assignee, reset status to OPEN/DEFERRED, update metadata
     // Note: We store the handoff note in metadata since tasks use descriptionRef
     // Setting status to OPEN ensures dispatch daemon can pick up the task
     return this.api.update<Task>(taskId, {
       assignee: undefined,
-      status: TaskStatus.OPEN,
+      status: shouldDeferForHandoffLoop ? TaskStatus.DEFERRED : TaskStatus.OPEN,
+      tags: shouldDeferForHandoffLoop
+        ? [...new Set([...(task.tags ?? []), 'handoff-loop'])]
+        : task.tags,
       metadata: newMeta,
     });
+  }
+
+  setMaxHandoffsBeforeDefer(maxHandoffsBeforeDefer: number): void {
+    this.maxHandoffsBeforeDefer = Math.max(1, maxHandoffsBeforeDefer);
   }
 
   async updateSessionId(taskId: ElementId, sessionId: string): Promise<Task> {
@@ -883,6 +911,7 @@ export class TaskAssignmentServiceImpl implements TaskAssignmentService {
 export function createTaskAssignmentService(
   api: QuarryAPI,
   mergeRequestProvider?: MergeRequestProvider,
+  maxHandoffsBeforeDefer: number = 3
 ): TaskAssignmentService {
-  return new TaskAssignmentServiceImpl(api, mergeRequestProvider);
+  return new TaskAssignmentServiceImpl(api, mergeRequestProvider, maxHandoffsBeforeDefer);
 }

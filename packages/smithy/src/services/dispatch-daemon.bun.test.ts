@@ -1551,6 +1551,19 @@ describe('DispatchDaemon Plan Auto-Complete', () => {
     }
   });
 
+  test('normalizes maxHandoffsBeforeDefer with default and updates', () => {
+    const initial = daemon.getConfig();
+    expect(initial.maxHandoffsBeforeDefer).toBe(3);
+
+    daemon.updateConfig({ maxHandoffsBeforeDefer: 5 });
+    const updated = daemon.getConfig();
+    expect(updated.maxHandoffsBeforeDefer).toBe(5);
+
+    daemon.updateConfig({ maxHandoffsBeforeDefer: 0 });
+    const clamped = daemon.getConfig();
+    expect(clamped.maxHandoffsBeforeDefer).toBe(1);
+  });
+
   // Helper to create a test plan
   async function createTestPlan(status: PlanStatus = PlanStatus.ACTIVE): Promise<Plan> {
     const plan = await createPlan({
