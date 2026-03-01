@@ -300,40 +300,29 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
       let sessionOutcome: MetricOutcome = 'completed';
       let sessionInputTokens = 0;
       let sessionOutputTokens = 0;
+      // Capture the task assignment at session start, before dispatch/unassign transitions on exit.
+      const sessionTaskIdPromise = taskAssignmentService.getAgentTasks(agentId)
+        .then(tasks => tasks.length > 0 ? tasks[0].taskId : undefined)
+        .catch(() => undefined);
 
       // Helper to record metrics once on session completion
-      const recordSessionMetrics = () => {
+      const recordSessionMetrics = async () => {
         if (metricsRecorded) return;
         metricsRecorded = true;
 
         const durationMs = Date.now() - sessionStartTime;
         const provider = 'claude-code';
+        const taskId = await sessionTaskIdPromise;
 
-        // Look up the task ID from the agent's current assignment (best-effort)
-        taskAssignmentService.getAgentTasks(agentId)
-          .then(tasks => {
-            const taskId = tasks.length > 0 ? tasks[0].taskId : undefined;
-            metricsService.record({
-              provider,
-              sessionId: session.id,
-              taskId,
-              inputTokens: sessionInputTokens,
-              outputTokens: sessionOutputTokens,
-              durationMs,
-              outcome: sessionOutcome,
-            });
-          })
-          .catch(() => {
-            // If task lookup fails, record without task ID
-            metricsService.record({
-              provider,
-              sessionId: session.id,
-              inputTokens: sessionInputTokens,
-              outputTokens: sessionOutputTokens,
-              durationMs,
-              outcome: sessionOutcome,
-            });
-          });
+        metricsService.record({
+          provider,
+          sessionId: session.id,
+          taskId,
+          inputTokens: sessionInputTokens,
+          outputTokens: sessionOutputTokens,
+          durationMs,
+          outcome: sessionOutcome,
+        });
       };
 
       // Auto-terminate sessions when they emit a 'result' event
@@ -347,7 +336,7 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
             sessionOutputTokens = usage.output_tokens ?? 0;
           }
           sessionOutcome = 'completed';
-          recordSessionMetrics();
+          void recordSessionMetrics();
 
           logger.debug(`Session ${session.id} emitted result, auto-terminating`);
           sessionManager.stopSession(session.id, {
@@ -366,7 +355,7 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
         // If metrics haven't been recorded yet (no result event), record on exit
         if (!metricsRecorded) {
           sessionOutcome = (code && code !== 0) ? 'failed' : 'completed';
-          recordSessionMetrics();
+          void recordSessionMetrics();
         }
         cleanup();
       };
