@@ -2439,6 +2439,84 @@ export class DispatchDaemonImpl implements DispatchDaemon {
   }
 
   /**
+   * Gets the director that owns a task.
+   *
+   * Ownership is determined by:
+   * 1. task.owner - explicit owner field (if it's a director)
+   * 2. task.createdBy - the entity that created the task (if it's a director)
+   * 3. Fallback: first registered director (backward compatible)
+   *
+   * @param task - The task to find the owner director for
+   * @returns The director agent or undefined if no directors exist
+   */
+  private async getTaskDirector(task: Task): Promise<AgentEntity | undefined> {
+    const directors = await this.agentRegistry.getDirectors();
+
+    if (directors.length === 0) {
+      return undefined;
+    }
+
+    if (directors.length === 1) {
+      // Single director - always use it (backward compatible)
+      return directors[0];
+    }
+
+    // Multiple directors - find the one that owns/created the task
+
+    // Check task.owner first (explicit ownership)
+    if (task.owner) {
+      const ownerDirector = directors.find(d => d.id === (task.owner as unknown as string));
+      if (ownerDirector) {
+        return ownerDirector;
+      }
+    }
+
+    // Check task.createdBy (creator)
+    if (task.createdBy) {
+      const creatorDirector = directors.find(d => d.id === (task.createdBy as unknown as string));
+      if (creatorDirector) {
+        return creatorDirector;
+      }
+    }
+
+    // Fallback: first registered director
+    return directors[0];
+  }
+
+  /**
+   * Gets the director that an agent reports to.
+   *
+   * For agents with reportsTo set to a director, returns that director.
+   * Otherwise falls back to the first registered director.
+   *
+   * @param agent - The agent to find the reporting director for
+   * @returns The director agent or undefined if no directors exist
+   */
+  private async getAgentDirector(agent: AgentEntity): Promise<AgentEntity | undefined> {
+    const directors = await this.agentRegistry.getDirectors();
+
+    if (directors.length === 0) {
+      return undefined;
+    }
+
+    if (directors.length === 1) {
+      // Single director - always use it (backward compatible)
+      return directors[0];
+    }
+
+    // Multiple directors - find the one the agent reports to
+    if (agent.reportsTo) {
+      const reportingDirector = directors.find(d => d.id === (agent.reportsTo as unknown as string));
+      if (reportingDirector) {
+        return reportingDirector;
+      }
+    }
+
+    // Fallback: first registered director
+    return directors[0];
+  }
+
+  /**
    * Builds the initial prompt for a task assignment.
    * Includes the worker role prompt followed by task-specific details.
    * Fetches the description Document content so handoff notes (appended to
@@ -2461,8 +2539,8 @@ export class DispatchDaemonImpl implements DispatchDaemon {
       );
     }
 
-    // Get the director ID for context
-    const director = await this.agentRegistry.getDirector();
+    // Get the director that owns this task (for multi-director support)
+    const director = await this.getTaskDirector(task);
     const directorId = director?.id ?? 'unknown';
 
     parts.push(
@@ -2547,8 +2625,8 @@ export class DispatchDaemonImpl implements DispatchDaemon {
     const prUrl = orchestratorMeta?.mergeRequestUrl as string | undefined;
     const branch = orchestratorMeta?.branch as string | undefined;
 
-    // Get the director ID for context
-    const director = await this.agentRegistry.getDirector();
+    // Get the director that owns this task (for multi-director support)
+    const director = await this.getTaskDirector(task);
     const directorId = director?.id ?? 'unknown';
 
     parts.push(
@@ -3018,8 +3096,8 @@ export class DispatchDaemonImpl implements DispatchDaemon {
       );
     }
 
-    // Get the director ID for context
-    const director = await this.agentRegistry.getDirector();
+    // Get the director that owns this task (for multi-director support)
+    const director = await this.getTaskDirector(task);
     const directorId = director?.id ?? 'unknown';
 
     const branch = taskMeta?.branch ?? taskMeta?.handoffBranch;
@@ -3441,8 +3519,8 @@ export class DispatchDaemonImpl implements DispatchDaemon {
     const messagesBlock = formattedMessages.join('\n');
     const prompt = triageResult.prompt.replace('{{MESSAGES}}', messagesBlock);
 
-    // Get the director ID for context
-    const director = await this.agentRegistry.getDirector();
+    // Get the director that this agent reports to (for multi-director support)
+    const director = await this.getAgentDirector(agent);
     const directorId = director?.id ?? 'unknown';
 
     return `${prompt}\n\n---\n\n**Worker ID:** ${agent.id}\n**Director ID:** ${directorId}\n**Channel:** ${channelId}\n**Agent:** ${agent.name}\n**Message count:** ${triageItems.length}`;

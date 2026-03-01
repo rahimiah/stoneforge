@@ -10,7 +10,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { X, Loader2, Plus, ChevronLeft } from 'lucide-react';
 import { useCreateTask } from '../../api/hooks/useTasks';
-import { useAgents, useOperators, type Operator } from '../../api/hooks/useAgents';
+import { useAgents, useOperators, useDirectors, type Operator } from '../../api/hooks/useAgents';
 import { useCurrentUser } from '../../contexts';
 import { TagInput } from '@stoneforge/ui';
 import type { Priority, Complexity, TaskTypeValue, Agent } from '../../api/types';
@@ -52,6 +52,7 @@ export function CreateTaskModal({ isOpen, onClose, onSuccess, defaultToBacklog =
   const [complexity, setComplexity] = useState<Complexity>(3);
   const [taskType, setTaskType] = useState<TaskTypeValue>('task');
   const [assignee, setAssignee] = useState('');
+  const [owner, setOwner] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [addToBacklog, setAddToBacklog] = useState(defaultToBacklog);
 
@@ -59,12 +60,22 @@ export function CreateTaskModal({ isOpen, onClose, onSuccess, defaultToBacklog =
   const createTask = useCreateTask();
   const { data: agentsData } = useAgents('worker');
   const { data: operatorsData } = useOperators();
+  const { directors } = useDirectors();
   const { currentUser } = useCurrentUser();
 
   // Get available worker agents for assignment
   const workers: Agent[] = agentsData?.agents ?? [];
   // Get available operators (human entities) for assignment
   const operators: Operator[] = operatorsData?.items ?? [];
+  // Check if multiple directors exist (for showing owner dropdown)
+  const hasMultipleDirectors = directors.length > 1;
+
+  // Set default owner to first director when multiple exist
+  useEffect(() => {
+    if (hasMultipleDirectors && !owner && directors.length > 0) {
+      setOwner(directors[0].id);
+    }
+  }, [hasMultipleDirectors, owner, directors]);
 
   // Focus title input when modal opens
   useEffect(() => {
@@ -78,6 +89,10 @@ export function CreateTaskModal({ isOpen, onClose, onSuccess, defaultToBacklog =
     if (isOpen) {
       // When opening, set the backlog checkbox based on prop
       setAddToBacklog(defaultToBacklog);
+      // Reset owner to first director when opening with multiple directors
+      if (hasMultipleDirectors && directors.length > 0) {
+        setOwner(directors[0].id);
+      }
     } else {
       // When closing, reset all form fields
       setTitle('');
@@ -86,11 +101,12 @@ export function CreateTaskModal({ isOpen, onClose, onSuccess, defaultToBacklog =
       setComplexity(3);
       setTaskType('task');
       setAssignee('');
+      setOwner('');
       setTags([]);
       setAddToBacklog(false);
       createTask.reset();
     }
-  }, [isOpen, defaultToBacklog]);
+  }, [isOpen, defaultToBacklog, hasMultipleDirectors, directors]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -106,6 +122,7 @@ export function CreateTaskModal({ isOpen, onClose, onSuccess, defaultToBacklog =
         complexity,
         taskType,
         assignee: assignee || undefined,
+        owner: owner || undefined,
         tags: tags.length > 0 ? tags : undefined,
         status: addToBacklog ? 'backlog' : undefined,
       });
@@ -178,8 +195,11 @@ export function CreateTaskModal({ isOpen, onClose, onSuccess, defaultToBacklog =
             setTaskType={setTaskType}
             assignee={assignee}
             setAssignee={setAssignee}
+            owner={owner}
+            setOwner={setOwner}
             workers={workers}
             operators={operators}
+            directors={directors}
             tags={tags}
             setTags={setTags}
             addToBacklog={addToBacklog}
@@ -241,8 +261,11 @@ export function CreateTaskModal({ isOpen, onClose, onSuccess, defaultToBacklog =
               setTaskType={setTaskType}
               assignee={assignee}
               setAssignee={setAssignee}
+              owner={owner}
+              setOwner={setOwner}
               workers={workers}
               operators={operators}
+              directors={directors}
               tags={tags}
               setTags={setTags}
               addToBacklog={addToBacklog}
@@ -285,6 +308,12 @@ export function CreateTaskModal({ isOpen, onClose, onSuccess, defaultToBacklog =
   );
 }
 
+// Director type for owner selection
+interface Director {
+  id: string;
+  name: string;
+}
+
 // Form fields component to reduce duplication
 interface FormFieldsProps {
   title: string;
@@ -300,8 +329,11 @@ interface FormFieldsProps {
   setTaskType: (value: TaskTypeValue) => void;
   assignee: string;
   setAssignee: (value: string) => void;
+  owner: string;
+  setOwner: (value: string) => void;
   workers: Agent[];
   operators: Operator[];
+  directors: Director[];
   tags: string[];
   setTags: (value: string[]) => void;
   addToBacklog: boolean;
@@ -322,13 +354,17 @@ function FormFields({
   setTaskType,
   assignee,
   setAssignee,
+  owner,
+  setOwner,
   workers,
   operators,
+  directors,
   tags,
   setTags,
   addToBacklog,
   setAddToBacklog,
 }: FormFieldsProps) {
+  const hasMultipleDirectors = directors.length > 1;
   return (
     <>
       {/* Title */}
@@ -479,6 +515,34 @@ function FormFields({
           </select>
         </div>
       </div>
+
+      {/* Owner (Director) - only show when multiple directors exist */}
+      {hasMultipleDirectors && (
+        <div className="mb-4">
+          <label
+            htmlFor="task-owner"
+            className="block text-sm font-medium text-[var(--color-text)] mb-1"
+          >
+            Owner (Director)
+          </label>
+          <select
+            id="task-owner"
+            value={owner}
+            onChange={(e) => setOwner(e.target.value)}
+            className="w-full px-3 py-2 border border-[var(--color-border)] rounded-md bg-[var(--color-input-bg)] text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-transparent"
+            data-testid="create-task-owner"
+          >
+            {directors.map((director) => (
+              <option key={director.id} value={director.id}>
+                {director.name}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-[var(--color-text-tertiary)]">
+            Director that will manage this task
+          </p>
+        </div>
+      )}
 
       {/* Tags */}
       <div className="mb-4">

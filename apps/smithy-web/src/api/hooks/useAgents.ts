@@ -209,6 +209,56 @@ export function useDirector() {
   };
 }
 
+/**
+ * Hook to get all Director agents for multi-director support
+ * Returns all registered directors with their status information
+ */
+export function useDirectors() {
+  const { data, isLoading, error, refetch } = useAgents();
+
+  const directors = useMemo(() => {
+    const agents = data?.agents ?? [];
+    return agents.filter(a => a.metadata?.agent?.agentRole === 'director');
+  }, [data?.agents]);
+
+  return {
+    directors,
+    isLoading,
+    error,
+    refetch,
+  };
+}
+
+/**
+ * Hook to get a specific Director's status
+ * Used for individual director tabs in multi-director mode
+ */
+export function useDirectorStatus(directorId: string | undefined) {
+  const {
+    data: statusData,
+    isLoading,
+    error,
+  } = useAgentStatus(directorId);
+
+  // Find the most recent session with a providerSessionId (resumable)
+  const lastResumableSession = useMemo(() => {
+    const history = statusData?.recentHistory ?? [];
+    return history.find((h) => !!h.providerSessionId) ?? null;
+  }, [statusData?.recentHistory]);
+
+  const hasResumableSession = lastResumableSession !== null;
+
+  return {
+    hasActiveSession: statusData?.hasActiveSession ?? false,
+    activeSession: statusData?.activeSession ?? null,
+    recentHistory: statusData?.recentHistory ?? [],
+    lastResumableSession,
+    hasResumableSession,
+    isLoading,
+    error,
+  };
+}
+
 // ============================================================================
 // Mutation Hooks
 // ============================================================================

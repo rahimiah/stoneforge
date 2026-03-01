@@ -168,8 +168,15 @@ export interface AgentRegistry {
 
   /**
    * Gets the Director agent (there should be only one per workspace)
+   * @deprecated Use getDirectors() for multi-director support
    */
   getDirector(): Promise<AgentEntity | undefined>;
+
+  /**
+   * Gets all Director agents
+   * Returns all registered directors for multi-director support
+   */
+  getDirectors(): Promise<AgentEntity[]>;
 
   // ----------------------------------------
   // Agent Session Management
@@ -421,6 +428,10 @@ export class AgentRegistryImpl implements AgentRegistry {
   async getDirector(): Promise<AgentEntity | undefined> {
     const directors = await this.listAgents({ role: 'director' });
     return directors[0];
+  }
+
+  async getDirectors(): Promise<AgentEntity[]> {
+    return this.listAgents({ role: 'director' });
   }
 
   // ----------------------------------------
