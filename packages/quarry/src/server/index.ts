@@ -263,6 +263,13 @@ export function createQuarryApp(options: QuarryServerOptions = {}): QuarryApp {
     });
   });
 
+  app.get('/api/settings/project', (c) => {
+    return c.json({
+      name: config.project.name,
+      color: config.project.color,
+    });
+  });
+
 // ============================================================================
 // Stats Endpoint
 // ============================================================================

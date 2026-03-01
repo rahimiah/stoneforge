@@ -94,6 +94,10 @@ export function mergeConfiguration(
       mode: partial.identity?.mode !== undefined ? partial.identity.mode : base.identity.mode,
       timeTolerance: partial.identity?.timeTolerance !== undefined ? partial.identity.timeTolerance : base.identity.timeTolerance,
     },
+    project: {
+      name: partial.project?.name !== undefined ? partial.project.name : base.project.name,
+      color: partial.project?.color !== undefined ? partial.project.color : base.project.color,
+    },
     plugins: {
       packages: partial.plugins?.packages !== undefined ? partial.plugins.packages : [...(base.plugins?.packages ?? [])],
     },
@@ -170,6 +174,10 @@ export function cloneConfiguration(config: Configuration): Configuration {
     identity: {
       mode: config.identity.mode,
       timeTolerance: config.identity.timeTolerance,
+    },
+    project: {
+      name: config.project.name,
+      color: config.project.color,
     },
     plugins: {
       packages: [...(config.plugins?.packages ?? [])],
@@ -255,6 +263,18 @@ export function diffConfigurations(
     diff.identity = identityDiff;
   }
 
+  // Project diff
+  const projectDiff: Partial<Configuration['project']> = {};
+  if (a.project.name !== b.project.name) {
+    projectDiff.name = b.project.name;
+  }
+  if (a.project.color !== b.project.color) {
+    projectDiff.color = b.project.color;
+  }
+  if (Object.keys(projectDiff).length > 0) {
+    diff.project = projectDiff;
+  }
+
   // Plugins diff
   const aPackages = a.plugins?.packages ?? [];
   const bPackages = b.plugins?.packages ?? [];
@@ -308,6 +328,8 @@ export function configurationsEqual(a: Configuration, b: Configuration): boolean
     a.tombstone.minTtl === b.tombstone.minTtl &&
     a.identity.mode === b.identity.mode &&
     a.identity.timeTolerance === b.identity.timeTolerance &&
+    a.project.name === b.project.name &&
+    a.project.color === b.project.color &&
     JSON.stringify(aPackages) === JSON.stringify(bPackages) &&
     a.externalSync.enabled === b.externalSync.enabled &&
     a.externalSync.pollInterval === b.externalSync.pollInterval &&

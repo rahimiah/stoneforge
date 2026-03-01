@@ -6,6 +6,7 @@
  */
 
 import { Hono } from 'hono';
+import { loadConfig } from '@stoneforge/quarry';
 import type { Services } from '../services.js';
 import type { ServerAgentDefaults } from '../../services/settings-service.js';
 import { createLogger } from '../../utils/logger.js';
@@ -24,6 +25,20 @@ export function createSettingsRoutes(services: Services) {
     } catch (error) {
       logger.error('Failed to get agent defaults:', error);
       return c.json({ error: { code: 'INTERNAL_ERROR', message: String(error) } }, 500);
+    }
+  });
+
+  // GET /api/settings/project
+  app.get('/api/settings/project', (c) => {
+    try {
+      const config = loadConfig();
+      return c.json({
+        name: config.project.name,
+        color: config.project.color,
+      });
+    } catch (error) {
+      logger.error('Failed to get project settings:', error);
+      return c.json({ name: 'Stoneforge', color: '#2563eb' });
     }
   });
 

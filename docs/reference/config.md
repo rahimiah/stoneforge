@@ -51,6 +51,10 @@ interface Configuration {
     mode: IdentityMode;              // 'soft' | 'cryptographic' | 'hybrid'
     timeTolerance: Duration;         // Signature tolerance (default: 5 min)
   };
+  project: {
+    name: string;                    // Project display name (default: 'Stoneforge')
+    color: string;                   // Accent color hex (default: '#2563eb')
+  };
   plugins: {
     packages: string[];              // CLI plugin package names
   };
@@ -131,6 +135,8 @@ type ConfigPath =
   | 'tombstone.minTtl'
   | 'identity.mode'
   | 'identity.timeTolerance'
+  | 'project.name'
+  | 'project.color'
   | 'plugins.packages'
   | 'externalSync.enabled'
   | 'externalSync.pollInterval'
@@ -227,6 +233,10 @@ tombstone:
 identity:
   mode: soft
   time_tolerance: 300000  # 5 minutes in ms
+
+project:
+  name: Stoneforge
+  color: "#2563eb"
 
 external_sync:
   enabled: false

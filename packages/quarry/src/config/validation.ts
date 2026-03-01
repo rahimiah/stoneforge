@@ -267,6 +267,41 @@ export function validatePlaybookPaths(value: unknown): string[] {
   return value as string[];
 }
 
+/**
+ * Validates a project name
+ */
+export function isValidProjectName(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+/**
+ * Validates project name and throws if invalid
+ */
+export function validateProjectName(value: unknown): string {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new ValidationError(
+      'project.name must be a non-empty string',
+      ErrorCode.INVALID_INPUT,
+      { field: 'project.name', value, expected: 'non-empty string' }
+    );
+  }
+  return value;
+}
+
+/**
+ * Validates hex color and throws if invalid
+ */
+export function validateProjectColor(value: unknown): string {
+  if (typeof value !== 'string' || !/^#([0-9a-fA-F]{6})$/.test(value)) {
+    throw new ValidationError(
+      'project.color must be a hex color in #RRGGBB format',
+      ErrorCode.INVALID_INPUT,
+      { field: 'project.color', value, expected: '#RRGGBB' }
+    );
+  }
+  return value;
+}
+
 // ============================================================================
 // Full Configuration Validation
 // ============================================================================
@@ -398,6 +433,18 @@ export function validateConfiguration(config: unknown): Configuration {
   }
   validateDurationRange(identity.timeTolerance, MIN_TIME_TOLERANCE, MAX_TIME_TOLERANCE, 'identity.timeTolerance');
 
+  // Validate project
+  if (typeof obj.project !== 'object' || obj.project === null) {
+    throw new ValidationError(
+      'Configuration must include project object',
+      ErrorCode.MISSING_REQUIRED_FIELD,
+      { field: 'project' }
+    );
+  }
+  const project = obj.project as Record<string, unknown>;
+  validateProjectName(project.name);
+  validateProjectColor(project.color);
+
   // Validate externalSync
   if (typeof obj.externalSync !== 'object' || obj.externalSync === null) {
     throw new ValidationError(
@@ -527,6 +574,12 @@ export function validatePartialConfiguration(config: PartialConfiguration): void
       MAX_TIME_TOLERANCE,
       'identity.timeTolerance'
     );
+  }
+  if (config.project?.name !== undefined) {
+    validateProjectName(config.project.name);
+  }
+  if (config.project?.color !== undefined) {
+    validateProjectColor(config.project.color);
   }
   // Cross-field validation for tombstone
   if (config.tombstone?.ttl !== undefined && config.tombstone?.minTtl !== undefined) {

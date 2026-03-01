@@ -3,7 +3,7 @@ import { Outlet, useRouterState, Link, useRouter } from '@tanstack/react-router'
 import { Sidebar } from './Sidebar';
 import { MobileDrawer, UserSelector, type ConnectionState } from '@stoneforge/ui';
 import { CommandPalette } from '../navigation';
-import { ThemeToggle } from '@stoneforge/ui';
+import { ThemeToggle, applyProjectIdentity, resolveProjectIdentity } from '@stoneforge/ui';
 import { useRealtimeEvents } from '../../api/hooks/useRealtimeEvents';
 import { useQuery } from '@tanstack/react-query';
 import { useGlobalKeyboardShortcuts, useKeyboardShortcut, useIsMobile, useIsTablet, GlobalQuickActionsProvider } from '../../hooks';
@@ -35,6 +35,11 @@ interface HealthResponse {
   };
 }
 
+interface ProjectSettingsResponse {
+  name: string;
+  color: string;
+}
+
 function useHealth() {
   return useQuery<HealthResponse>({
     queryKey: ['health'],
@@ -44,6 +49,18 @@ function useHealth() {
       return response.json();
     },
     refetchInterval: 30000,
+  });
+}
+
+function useProjectSettings() {
+  return useQuery<ProjectSettingsResponse>({
+    queryKey: ['settings', 'project'],
+    queryFn: async () => {
+      const response = await fetch('/api/settings/project');
+      if (!response.ok) throw new Error('Failed to fetch project settings');
+      return response.json();
+    },
+    staleTime: 300000,
   });
 }
 
@@ -282,8 +299,13 @@ export function AppShell() {
   } = useSidebarState();
 
   const health = useHealth();
+  const projectSettings = useProjectSettings();
   const { connectionState } = useRealtimeEvents({ channels: ['*'] });
   const router = useRouter();
+  const projectIdentity = useMemo(
+    () => resolveProjectIdentity(projectSettings.data),
+    [projectSettings.data?.name, projectSettings.data?.color]
+  );
 
   // Initialize global keyboard shortcuts (G T, G P, etc.)
   useGlobalKeyboardShortcuts();
@@ -318,13 +340,17 @@ export function AppShell() {
     return () => unsubscribe();
   }, [router, isMobile, mobileDrawerOpen, setMobileDrawerOpen]);
 
-  // Dynamic document title: "Quarry | {Page}"
+  useEffect(() => {
+    applyProjectIdentity(projectSettings.data);
+  }, [projectSettings.data?.name, projectSettings.data?.color]);
+
+  // Dynamic document title: "{Project} | {Page}"
   const routerState = useRouterState();
   useEffect(() => {
     const path = routerState.location.pathname;
     const config = ROUTE_CONFIG[path];
-    document.title = config ? `Quarry | ${config.label}` : 'Quarry';
-  }, [routerState.location.pathname]);
+    document.title = config ? `${projectIdentity.name} | ${config.label}` : projectIdentity.name;
+  }, [routerState.location.pathname, projectIdentity.name]);
 
   // Calculate sidebar collapsed state based on device type
   // - Mobile: sidebar is hidden (shown as drawer)
@@ -348,6 +374,7 @@ export function AppShell() {
             collapsed={false}
             onToggle={closeMobileDrawer}
             isMobileDrawer
+            projectName={projectIdentity.name}
           />
         </MobileDrawer>
       )}
@@ -357,6 +384,7 @@ export function AppShell() {
         <Sidebar
           collapsed={sidebarCollapsed}
           onToggle={() => setDesktopCollapsed(!desktopCollapsed)}
+          projectName={projectIdentity.name}
         />
       )}
 

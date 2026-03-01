@@ -327,6 +327,10 @@ function createTrackedDefaults(): TrackedConfiguration {
       mode: { value: DEFAULT_CONFIG.identity.mode, source: ConfigSourceEnum.DEFAULT },
       timeTolerance: { value: DEFAULT_CONFIG.identity.timeTolerance, source: ConfigSourceEnum.DEFAULT },
     },
+    project: {
+      name: { value: DEFAULT_CONFIG.project.name, source: ConfigSourceEnum.DEFAULT },
+      color: { value: DEFAULT_CONFIG.project.color, source: ConfigSourceEnum.DEFAULT },
+    },
     plugins: {
       packages: { value: [...DEFAULT_CONFIG.plugins.packages], source: ConfigSourceEnum.DEFAULT },
     },
@@ -388,6 +392,12 @@ function mergeTrackedConfig(
   }
   if (partial.identity?.timeTolerance !== undefined) {
     result.identity = { ...result.identity, timeTolerance: { value: partial.identity.timeTolerance, source } };
+  }
+  if (partial.project?.name !== undefined) {
+    result.project = { ...result.project, name: { value: partial.project.name, source } };
+  }
+  if (partial.project?.color !== undefined) {
+    result.project = { ...result.project, color: { value: partial.project.color, source } };
   }
   if (partial.plugins?.packages !== undefined) {
     result.plugins = { packages: { value: partial.plugins.packages, source } };

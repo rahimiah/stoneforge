@@ -6,7 +6,16 @@
  */
 
 import { IdentityMode } from '../systems/identity.js';
-import type { Configuration, SyncConfig, PlaybookConfig, TombstoneConfig, IdentityConfigSection, PluginsConfig, ExternalSyncConfig } from './types.js';
+import type {
+  Configuration,
+  SyncConfig,
+  PlaybookConfig,
+  TombstoneConfig,
+  IdentityConfigSection,
+  ProjectConfigSection,
+  PluginsConfig,
+  ExternalSyncConfig,
+} from './types.js';
 
 // ============================================================================
 // Time Constants (in milliseconds)
@@ -65,6 +74,14 @@ export const DEFAULT_IDENTITY_CONFIG: IdentityConfigSection = {
 };
 
 /**
+ * Default project identity configuration
+ */
+export const DEFAULT_PROJECT_CONFIG: ProjectConfigSection = {
+  name: 'Stoneforge',
+  color: '#2563eb',
+};
+
+/**
  * Default plugins configuration
  */
 export const DEFAULT_PLUGINS_CONFIG: PluginsConfig = {
@@ -94,6 +111,7 @@ export const DEFAULT_CONFIG: Configuration = {
   playbooks: DEFAULT_PLAYBOOK_CONFIG,
   tombstone: DEFAULT_TOMBSTONE_CONFIG,
   identity: DEFAULT_IDENTITY_CONFIG,
+  project: DEFAULT_PROJECT_CONFIG,
   plugins: DEFAULT_PLUGINS_CONFIG,
   externalSync: DEFAULT_EXTERNAL_SYNC_CONFIG,
 };
@@ -155,6 +173,7 @@ export function getDefaultConfig(): Configuration {
     playbooks: { paths: [...DEFAULT_PLAYBOOK_CONFIG.paths] },
     tombstone: { ...DEFAULT_TOMBSTONE_CONFIG },
     identity: { ...DEFAULT_IDENTITY_CONFIG },
+    project: { ...DEFAULT_PROJECT_CONFIG },
     plugins: { packages: [...DEFAULT_PLUGINS_CONFIG.packages] },
     externalSync: { ...DEFAULT_EXTERNAL_SYNC_CONFIG },
   };

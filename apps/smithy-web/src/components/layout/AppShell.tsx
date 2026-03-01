@@ -6,7 +6,7 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { Outlet, useRouterState, Link, useRouter } from '@tanstack/react-router';
 import { Sidebar } from './Sidebar';
-import { MobileDrawer, UserSelector } from '@stoneforge/ui';
+import { MobileDrawer, UserSelector, applyProjectIdentity, resolveProjectIdentity } from '@stoneforge/ui';
 import { DirectorPanel } from './DirectorPanel';
 import { DaemonToggle } from './DaemonToggle';
 import { RateLimitBanner } from './RateLimitBanner';
@@ -49,6 +49,11 @@ interface HealthResponse {
   };
 }
 
+interface ProjectSettingsResponse {
+  name: string;
+  color: string;
+}
+
 function useHealth() {
   return useQuery<HealthResponse>({
     queryKey: ['health'],
@@ -58,6 +63,18 @@ function useHealth() {
       return response.json();
     },
     refetchInterval: 30000,
+  });
+}
+
+function useProjectSettings() {
+  return useQuery<ProjectSettingsResponse>({
+    queryKey: ['settings', 'project'],
+    queryFn: async () => {
+      const response = await fetch('/api/settings/project');
+      if (!response.ok) throw new Error('Failed to fetch project settings');
+      return response.json();
+    },
+    staleTime: 300000,
   });
 }
 
@@ -315,7 +332,12 @@ export function AppShell() {
   } = useDirectorPanelState();
 
   const health = useHealth();
+  const projectSettings = useProjectSettings();
   const router = useRouter();
+  const projectIdentity = useMemo(
+    () => resolveProjectIdentity(projectSettings.data),
+    [projectSettings.data?.name, projectSettings.data?.color]
+  );
 
   // Notification system
   const {
@@ -416,13 +438,17 @@ export function AppShell() {
     return () => unsubscribe();
   }, [router, isMobile, mobileDrawerOpen, setMobileDrawerOpen]);
 
-  // Dynamic document title: "Stoneforge | {Page}"
+  useEffect(() => {
+    applyProjectIdentity(projectSettings.data);
+  }, [projectSettings.data?.name, projectSettings.data?.color]);
+
+  // Dynamic document title: "{Project} | {Page}"
   const routerState = useRouterState();
   useEffect(() => {
     const path = routerState.location.pathname;
     const config = ROUTE_CONFIG[path];
-    document.title = config ? `Stoneforge | ${config.label}` : 'Stoneforge';
-  }, [routerState.location.pathname]);
+    document.title = config ? `${projectIdentity.name} | ${config.label}` : projectIdentity.name;
+  }, [routerState.location.pathname, projectIdentity.name]);
 
   const sidebarCollapsed = isMobile ? true : isTablet ? true : desktopCollapsed;
 
@@ -439,6 +465,7 @@ export function AppShell() {
             collapsed={false}
             onToggle={closeMobileDrawer}
             isMobileDrawer
+            projectName={projectIdentity.name}
           />
         </MobileDrawer>
       )}
@@ -448,6 +475,7 @@ export function AppShell() {
         <Sidebar
           collapsed={sidebarCollapsed}
           onToggle={() => setDesktopCollapsed(!desktopCollapsed)}
+          projectName={projectIdentity.name}
         />
       )}
 

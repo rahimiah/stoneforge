@@ -103,9 +103,15 @@ interface SidebarProps {
   collapsed?: boolean;
   onToggle?: () => void;
   isMobileDrawer?: boolean;
+  projectName?: string;
 }
 
-export function Sidebar({ collapsed = false, onToggle, isMobileDrawer = false }: SidebarProps) {
+export function Sidebar({
+  collapsed = false,
+  onToggle,
+  isMobileDrawer = false,
+  projectName = 'Stoneforge',
+}: SidebarProps) {
   const routerState = useRouterState();
   const currentPath = routerState.location.pathname;
 
@@ -241,11 +247,11 @@ export function Sidebar({ collapsed = false, onToggle, isMobileDrawer = false }:
         {showExpandedState && (
           <div className="flex items-center gap-2.5 ml-1">
             <img src="/logo.png" alt="" className="w-7 h-7 object-contain" />
-            <span className="text-xl font-semibold tracking-wide text-[var(--color-text)]" style={{ fontFamily: "'Space Grotesk', ui-sans-serif, system-ui, sans-serif" }}>stoneforge</span>
+            <span className="text-xl font-semibold tracking-wide text-[var(--color-text)]" style={{ fontFamily: "'Space Grotesk', ui-sans-serif, system-ui, sans-serif" }}>{projectName}</span>
           </div>
         )}
         {showCollapsedState && (
-          <img src="/logo.png" alt="Stoneforge" className="w-7 h-7 object-contain mx-auto" />
+          <img src="/logo.png" alt={`${projectName} logo`} className="w-7 h-7 object-contain mx-auto" />
         )}
         {showExpandedState && !isMobileDrawer && (
           <button

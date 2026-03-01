@@ -249,6 +249,17 @@ export function convertYamlToConfig(yamlConfig: YamlConfigFile): PartialConfigur
     }
   }
 
+  // Project section
+  if (yamlConfig.project) {
+    result.project = {};
+    if (yamlConfig.project.name !== undefined) {
+      result.project.name = yamlConfig.project.name;
+    }
+    if (yamlConfig.project.color !== undefined) {
+      result.project.color = yamlConfig.project.color;
+    }
+  }
+
   // Plugins section
   if (yamlConfig.plugins?.packages) {
     result.plugins = {
@@ -403,6 +414,17 @@ export function convertConfigToYaml(config: Configuration | PartialConfiguration
     }
   }
 
+  // Project section
+  if (config.project) {
+    result.project = {};
+    if (config.project.name !== undefined) {
+      result.project.name = config.project.name;
+    }
+    if (config.project.color !== undefined) {
+      result.project.color = config.project.color;
+    }
+  }
+
   // Plugins section
   if (config.plugins?.packages && config.plugins.packages.length > 0) {
     result.plugins = {
@@ -495,6 +517,7 @@ export function updateConfigFile(
     playbooks: updates.playbooks ? { ...existing.playbooks, ...updates.playbooks } : existing.playbooks,
     tombstone: updates.tombstone ? { ...existing.tombstone, ...updates.tombstone } : existing.tombstone,
     identity: updates.identity ? { ...existing.identity, ...updates.identity } : existing.identity,
+    project: updates.project ? { ...existing.project, ...updates.project } : existing.project,
     externalSync: updates.externalSync ? { ...existing.externalSync, ...updates.externalSync } : existing.externalSync,
   };
 

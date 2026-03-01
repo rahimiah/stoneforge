@@ -79,6 +79,16 @@ export interface IdentityConfigSection {
 }
 
 /**
+ * Project identity configuration
+ */
+export interface ProjectConfigSection {
+  /** Project display name (default: 'Stoneforge') */
+  name: string;
+  /** Primary accent color hex (default: '#2563eb') */
+  color: string;
+}
+
+/**
  * Conflict resolution strategy for external sync
  */
 export type ExternalSyncConflictStrategy = 'last_write_wins' | 'local_wins' | 'remote_wins' | 'manual';
@@ -151,6 +161,8 @@ export interface Configuration {
   tombstone: TombstoneConfig;
   /** Identity settings */
   identity: IdentityConfigSection;
+  /** Project identity settings */
+  project: ProjectConfigSection;
   /** CLI plugins settings */
   plugins: PluginsConfig;
   /** External sync settings */
@@ -168,6 +180,7 @@ export type PartialConfiguration = {
   playbooks?: Partial<PlaybookConfig>;
   tombstone?: Partial<TombstoneConfig>;
   identity?: Partial<IdentityConfigSection>;
+  project?: Partial<ProjectConfigSection>;
   plugins?: Partial<PluginsConfig>;
   externalSync?: Partial<ExternalSyncConfig>;
 };
@@ -226,6 +239,10 @@ export interface TrackedConfiguration {
     mode: TrackedValue<IdentityMode>;
     timeTolerance: TrackedValue<Duration>;
   };
+  project: {
+    name: TrackedValue<string>;
+    color: TrackedValue<string>;
+  };
   plugins: {
     packages: TrackedValue<string[]>;
   };
@@ -267,6 +284,10 @@ export interface YamlConfigFile {
   identity?: {
     mode?: string;
     time_tolerance?: string | number;
+  };
+  project?: {
+    name?: string;
+    color?: string;
   };
   plugins?: {
     packages?: string[];
@@ -371,6 +392,8 @@ export const VALID_CONFIG_PATHS = [
   'tombstone.minTtl',
   'identity.mode',
   'identity.timeTolerance',
+  'project.name',
+  'project.color',
   'plugins.packages',
   'externalSync.enabled',
   'externalSync.pollInterval',
@@ -408,6 +431,8 @@ export interface ConfigPathTypes {
   'tombstone.minTtl': Duration;
   'identity.mode': IdentityMode;
   'identity.timeTolerance': Duration;
+  'project.name': string;
+  'project.color': string;
   'plugins.packages': string[];
   'externalSync.enabled': boolean;
   'externalSync.pollInterval': Duration;
