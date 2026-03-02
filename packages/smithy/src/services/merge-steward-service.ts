@@ -41,7 +41,7 @@ import type { TaskAssignmentService, TaskAssignment } from './task-assignment-se
 import type { DispatchService } from './dispatch-service.js';
 import type { GitHubMergeProvider } from './merge-request-provider.js';
 import type { WorktreeManager } from '../git/worktree-manager.js';
-import { mergeBranch, syncLocalBranch, hasRemote, detectTargetBranch } from '../git/merge.js';
+import { mergeBranch, hasRemote, detectTargetBranch } from '../git/merge.js';
 import type { AgentRegistry } from './agent-registry.js';
 import { createLogger } from '../utils/logger.js';
 import type { OperationLogService } from './operation-log-service.js';
@@ -628,16 +628,7 @@ export class MergeStewardServiceImpl implements MergeStewardService {
         await this.cleanupAfterMerge(taskId, this.config.deleteBranchAfterMerge);
       }
 
-      // 6. Sync local target branch (best-effort, after all bookkeeping)
-      const targetBranch = await this.getTargetBranch();
-      const remoteExists = await hasRemote(this.config.workspaceRoot);
-      if (remoteExists) {
-        try {
-          await execAsync('git fetch origin', { cwd: this.config.workspaceRoot, encoding: 'utf8' });
-        } catch { /* best-effort */ }
-        await syncLocalBranch(this.config.workspaceRoot, targetBranch);
-      }
-      // In local-only mode, syncLocalBranch is handled by mergeBranch() itself
+      // 6. Local sync now handled by mergeBranch() with syncLocal: true
 
       return {
         taskId,
@@ -1033,7 +1024,7 @@ export class MergeStewardServiceImpl implements MergeStewardService {
       autoPush: this.config.autoPushAfterMerge,
       commitMessage: commitMessage ?? defaultMessage,
       preflight: true,
-      syncLocal: false,
+      syncLocal: true,
     });
   }
 

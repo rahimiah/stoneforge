@@ -423,7 +423,11 @@ export async function syncLocalBranch(
     }
 
     if (!currentBranch) {
-      console.warn('[git/merge] WARNING: workspace is in detached HEAD state during syncLocalBranch. Skipping sync. Run `git checkout master` to fix.');
+      // Detached HEAD — fall back to updating the ref directly
+      console.warn('[git/merge] Detached HEAD detected. Updating target branch ref directly.');
+      await execAsync(`git fetch origin ${targetBranch}:${targetBranch}`, {
+        cwd: workspaceRoot, encoding: 'utf8',
+      });
       return;
     }
 
@@ -438,10 +442,10 @@ export async function syncLocalBranch(
         cwd: workspaceRoot, encoding: 'utf8',
       });
     }
-  } catch {
+  } catch (err) {
     // Non-fatal: local branch sync is best-effort.
     // The merge is already pushed to remote — user can `git pull` manually.
-    console.warn('[git/merge] Failed to fast-forward local target branch (non-ff divergence or missing ref). Run `git pull` to sync manually.');
+    console.warn(`[git/merge] Failed to sync local ${targetBranch}: ${err instanceof Error ? err.message : String(err)}. Run \`git pull\` to sync manually.`);
   }
 }
 
