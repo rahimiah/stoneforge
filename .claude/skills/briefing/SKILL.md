@@ -5,15 +5,16 @@ description: Prepare a trading session briefing from Market Motion CLI data. Use
 
 # Briefing
 
-Run a one-shot Market Motion session prep. Fetch live data, synthesize it by intelligence value, print a concise terminal summary, and write a full markdown log.
+Run a one-shot Market Motion session prep. Fetch live data, synthesize it by intelligence value, print a concise terminal summary, write a full markdown log, and persist a local position snapshot for later position-change detection.
 
 ## Guardrails
 
 - Read only. Never place trades.
 - Do not add wrappers or external dependencies.
-- Run the eight `motion --json` commands directly.
+- Run the `motion --json` commands directly.
 - Continue on partial failure. Never abort the whole workflow because one command failed.
 - Do not show stack traces. Collapse failures to a short inline note.
+- After the fetch phase, always write a normalized snapshot to `~/.config/tradelog/latest.json` for the separate `tradelog` command.
 
 ## Fetch
 
@@ -21,6 +22,7 @@ Use UTC for timestamps. Create a temp workspace and capture each command separat
 
 ```bash
 mkdir -p ~/docs/sessions
+mkdir -p ~/.config/tradelog
 stamp="$(date -u +%Y-%m-%d-%H%M)"
 human_stamp="$(date -u +'%Y-%m-%d %H:%M UTC')"
 tmpdir="$(mktemp -d)"
@@ -30,7 +32,7 @@ Run exactly these commands:
 
 ```bash
 motion hl positions --json
-motion positions --json
+motion pm positions --json
 motion orders --json
 motion hl markets --json --limit 10
 motion markets trending --json
@@ -48,7 +50,7 @@ For each command:
 Suggested filenames:
 
 - `positions.json`
-- `positions-pm.json`
+- `pm-positions.json`
 - `orders-pm.json`
 - `hl-markets.json`
 - `trending.json`
@@ -58,13 +60,79 @@ Suggested filenames:
 
 If every command fails, print one short error line plus the final markdown-path line. Still write the markdown file with the recorded failures.
 
+## Position Snapshot Side Effect
+
+After the fetches and before exiting, write a snapshot for `~/bin/tradelog`.
+
+Snapshot path rules:
+
+1. Ensure `~/.config/tradelog/` exists.
+2. Build the new snapshot in memory first.
+3. If `~/.config/tradelog/latest.json` exists, move it to `~/.config/tradelog/previous.json` and overwrite any existing `previous.json`.
+4. Write the new snapshot to `latest.json`.
+
+Only two snapshot files should exist: `latest.json` and `previous.json`.
+
+Snapshot schema:
+
+```json
+{
+  "timestamp": "2026-03-07T16:28:00Z",
+  "session_file": "~/docs/sessions/2026-03-07-1628.md",
+  "positions": [
+    {
+      "venue": "HL",
+      "symbol": "BTC",
+      "side": "long",
+      "size": 0.5,
+      "entry": 69200,
+      "notional": 34600
+    },
+    {
+      "venue": "PM",
+      "symbol": "SpaceX IPO",
+      "outcome": "Yes",
+      "size": 100,
+      "avgPrice": 0.52,
+      "notional": 52
+    }
+  ]
+}
+```
+
+Normalization rules:
+
+- HL positions come from `motion hl positions --json`.
+- PM positions come from `motion pm positions --json`.
+- HL fields:
+  - `venue`: `HL`
+  - `symbol`: best symbol field available
+  - `side`: `long` or `short`
+  - `size`: numeric size
+  - `entry`: entry price if available
+  - `notional`: `abs(size) * markPrice`, or `abs(size) * entry` if mark price is unavailable
+- PM fields:
+  - `venue`: `PM`
+  - `symbol`: question/title text
+  - `outcome`: selected outcome label if available
+  - `size`: share count / contracts held
+  - `avgPrice`: average entry price if available
+  - `notional`: `size * avgPrice`
+- Omit fields that are unavailable. Do not invent values.
+
+Failure handling:
+
+- If one venue fetch fails, still write the other venue's normalized positions.
+- If both position fetches fail, still write the snapshot with `"positions": []` and an `"errors"` object naming the unavailable venues.
+- Do not skip snapshot writing because position fetches failed. The `tradelog` command depends on these files existing even when no positions could be fetched.
+
 ## Synthesis Order
 
 Build the briefing in this order. Higher items win terminal space.
 
 ### 1. News x Positions
 
-- Parse positions first. If there are no open positions, skip this section.
+- Parse both HL and PM positions first. If there are no open positions from either venue, skip this section.
 - Cross-reference held symbols against news `title`, `summary`, and `content`.
 - Treat ticker matches case-insensitively.
 - Prefer exact symbol matches such as `BTC`, `ETH`, `SOL`.
@@ -175,7 +243,7 @@ Full briefing -> ~/docs/sessions/YYYY-MM-DD-HHMM.md
 
 ```text
 SESSION PREP  YYYY-MM-DD HH:MM UTC
-Data unavailable: positions (...), pm positions (...), pm orders (...), hl markets (...), trending (...), arbs (...), news (...), alerts (...)
+Data unavailable: hl positions (...), pm positions (...), pm orders (...), hl markets (...), trending (...), arbs (...), news (...), alerts (...)
 Full briefing -> ~/docs/sessions/YYYY-MM-DD-HHMM.md
 ```
 
@@ -189,7 +257,7 @@ Use this structure:
 # Session Briefing - YYYY-MM-DD HH:MM UTC
 
 ## Status
-- positions: ok | unavailable (...)
+- hl positions: ok | unavailable (...)
 - pm positions: ok | unavailable (...)
 - pm orders: ok | unavailable (...)
 - hl markets: ok | unavailable (...)
@@ -235,10 +303,10 @@ Use this structure:
 
 ## Parsing Notes
 
-- Expect some commands to return objects under `data`, some under top-level keys like `markets`, `trending`, or `mispricings`.
+- Expect some commands to return objects under `data`, some under top-level keys like `markets`, `trending`, `positions`, or `mispricings`.
 - Infer the real array from the returned JSON instead of assuming one schema for every command.
 - Use the most specific field available:
-  - positions: symbol, side, size, entry, leverage, pnl, liquidation price
+  - hl positions: symbol, side, size, entry, leverage, pnl, liquidation price
   - pm positions: commonly under `data` array. Use: title, question, outcome, size, avgPrice, currentPrice, pnl, pnlPercent
   - pm orders: commonly under `data.orders` array. Use: market title, side, size, price, status
   - hl markets: `price`, `priceChange24h`, `openInterest`, `fundingRate`, `maxLeverage`

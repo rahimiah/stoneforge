@@ -1,0 +1,225 @@
+#!/usr/bin/env node
+
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import process from 'node:process';
+import { pathToFileURL } from 'node:url';
+
+export function resolveTradelogPaths(homeDir = os.homedir()) {
+  const configDir = path.join(homeDir, '.config', 'tradelog');
+  return {
+    homeDir,
+    configDir,
+    latestPath: path.join(configDir, 'latest.json'),
+    previousPath: path.join(configDir, 'previous.json'),
+    installPath: path.join(homeDir, 'bin', 'tradelog'),
+  };
+}
+
+export function readSnapshot(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+
+  return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+}
+
+export function buildPositionKey(position) {
+  return `${position.venue ?? ''}:${position.symbol ?? ''}:${position.outcome ?? ''}`;
+}
+
+function asNumber(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function formatTimestamp(timestamp) {
+  if (!timestamp) {
+    return 'unknown time';
+  }
+
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) {
+    return timestamp;
+  }
+
+  return date.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+}
+
+function formatDelta(delta) {
+  const absolute = Math.abs(delta);
+  return `${delta >= 0 ? '+' : '-'}${Number.isInteger(absolute) ? absolute : absolute}`;
+}
+
+function formatUsd(value, digits = 2) {
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+
+  const maximumFractionDigits = Math.abs(value) >= 100 ? 0 : digits;
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: maximumFractionDigits === 0 ? 0 : digits,
+    maximumFractionDigits,
+  }).format(value);
+}
+
+function formatVenue(venue) {
+  return `${venue ?? ''}`.padEnd(3, ' ');
+}
+
+function describeHlPosition(position) {
+  const parts = [formatVenue(position.venue), position.symbol, position.side].filter(Boolean);
+  const suffix = [];
+
+  if (position.size !== undefined) {
+    suffix.push(`${position.size}`);
+  }
+  if (Number.isFinite(asNumber(position.entry))) {
+    suffix.push(`@ ${formatUsd(asNumber(position.entry), 0)}`);
+  }
+  if (Number.isFinite(asNumber(position.notional))) {
+    suffix.push(`(${formatUsd(asNumber(position.notional), 0)} notional)`);
+  }
+
+  return `${parts.join(' ')} ${suffix.join(' ')}`.trim();
+}
+
+function describePmPosition(position) {
+  const parts = [formatVenue(position.venue), position.symbol, position.outcome].filter(Boolean);
+  const suffix = [];
+
+  if (position.size !== undefined) {
+    suffix.push(`${position.size} shares`);
+  }
+  if (Number.isFinite(asNumber(position.avgPrice))) {
+    suffix.push(`@ ${formatUsd(asNumber(position.avgPrice))}`);
+  }
+  if (Number.isFinite(asNumber(position.notional))) {
+    suffix.push(`(${formatUsd(asNumber(position.notional))} notional)`);
+  }
+
+  return `${parts.join(' ')} ${suffix.join(' ')}`.trim();
+}
+
+function describePosition(position) {
+  if ((position.venue ?? '').toUpperCase() === 'PM') {
+    return describePmPosition(position);
+  }
+  return describeHlPosition(position);
+}
+
+function formatOpened(position) {
+  return `  OPENED  ${describePosition(position)}`;
+}
+
+function formatClosed(position) {
+  if ((position.venue ?? '').toUpperCase() === 'PM') {
+    const entry = asNumber(position.avgPrice);
+    const entrySuffix = Number.isFinite(entry) ? ` (was ${formatUsd(entry)} entry)` : '';
+    return `  CLOSED  ${formatVenue(position.venue)} ${[position.symbol, position.outcome, position.size !== undefined ? `${position.size} shares` : null].filter(Boolean).join(' ')}${entrySuffix}`;
+  }
+
+  const entry = asNumber(position.entry);
+  const entrySuffix = Number.isFinite(entry) ? ` (was ${formatUsd(entry, 0)} entry)` : '';
+  return `  CLOSED  ${formatVenue(position.venue)} ${[position.symbol, position.side, position.size].filter(Boolean).join(' ')}${entrySuffix}`;
+}
+
+function formatSized(previousPosition, latestPosition) {
+  const oldSize = asNumber(previousPosition.size);
+  const newSize = asNumber(latestPosition.size);
+  const delta = newSize - oldSize;
+
+  if ((latestPosition.venue ?? '').toUpperCase() === 'PM') {
+    return `  SIZED   ${formatVenue(latestPosition.venue)} ${[latestPosition.symbol, latestPosition.outcome, `${previousPosition.size} -> ${latestPosition.size} shares`, `(${formatDelta(delta)})`].filter(Boolean).join(' ')}`;
+  }
+
+  return `  SIZED   ${formatVenue(latestPosition.venue)} ${[latestPosition.symbol, latestPosition.side, `${previousPosition.size} -> ${latestPosition.size}`, `(${formatDelta(delta)})`].filter(Boolean).join(' ')}`;
+}
+
+export function compareSnapshots(previousSnapshot, latestSnapshot) {
+  const previousPositions = previousSnapshot?.positions ?? [];
+  const latestPositions = latestSnapshot?.positions ?? [];
+  const previousMap = new Map(previousPositions.map((position) => [buildPositionKey(position), position]));
+  const latestMap = new Map(latestPositions.map((position) => [buildPositionKey(position), position]));
+  const changes = [];
+
+  for (const [key, latestPosition] of latestMap) {
+    if (!previousMap.has(key)) {
+      changes.push({ type: 'OPENED', latestPosition });
+      continue;
+    }
+
+    const previousPosition = previousMap.get(key);
+    if (asNumber(previousPosition?.size) !== asNumber(latestPosition?.size)) {
+      changes.push({ type: 'SIZED', previousPosition, latestPosition });
+    }
+  }
+
+  for (const [key, previousPosition] of previousMap) {
+    if (!latestMap.has(key)) {
+      changes.push({ type: 'CLOSED', previousPosition });
+    }
+  }
+
+  return changes;
+}
+
+export function renderPositionChanges(previousSnapshot, latestSnapshot) {
+  if (!latestSnapshot) {
+    return 'No snapshot found. Run /briefing first.';
+  }
+
+  if (!previousSnapshot) {
+    return 'No previous snapshot. Run /briefing twice to start tracking changes.';
+  }
+
+  const previousPositions = previousSnapshot.positions ?? [];
+  const latestPositions = latestSnapshot.positions ?? [];
+  if (previousPositions.length === 0 && latestPositions.length === 0) {
+    return 'No positions tracked in either snapshot.';
+  }
+
+  const changes = compareSnapshots(previousSnapshot, latestSnapshot);
+  const since = formatTimestamp(previousSnapshot.timestamp);
+
+  if (changes.length === 0) {
+    return `No position changes since last briefing (${since}).`;
+  }
+
+  const lines = [`POSITION CHANGES since ${since}`, ''];
+  for (const change of changes) {
+    if (change.type === 'OPENED') {
+      lines.push(formatOpened(change.latestPosition));
+    } else if (change.type === 'CLOSED') {
+      lines.push(formatClosed(change.previousPosition));
+    } else if (change.type === 'SIZED') {
+      lines.push(formatSized(change.previousPosition, change.latestPosition));
+    }
+  }
+
+  lines.push('');
+  lines.push(`${changes.length} changes detected`);
+  return lines.join('\n');
+}
+
+export function runTradelog({ homeDir = os.homedir(), stdout = process.stdout } = {}) {
+  const paths = resolveTradelogPaths(homeDir);
+  const latestSnapshot = readSnapshot(paths.latestPath);
+  const previousSnapshot = readSnapshot(paths.previousPath);
+  stdout.write(`${renderPositionChanges(previousSnapshot, latestSnapshot)}\n`);
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  runTradelog();
+}
