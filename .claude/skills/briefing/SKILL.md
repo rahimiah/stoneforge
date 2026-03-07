@@ -11,7 +11,7 @@ Run a one-shot Market Motion session prep. Fetch live data, synthesize it by int
 
 - Read only. Never place trades.
 - Do not add wrappers or external dependencies.
-- Run the six `motion --json` commands directly.
+- Run the eight `motion --json` commands directly.
 - Continue on partial failure. Never abort the whole workflow because one command failed.
 - Do not show stack traces. Collapse failures to a short inline note.
 
@@ -30,6 +30,8 @@ Run exactly these commands:
 
 ```bash
 motion hl positions --json
+motion positions --json
+motion orders --json
 motion hl markets --json --limit 10
 motion markets trending --json
 motion arb scan --actionable --json
@@ -46,6 +48,8 @@ For each command:
 Suggested filenames:
 
 - `positions.json`
+- `positions-pm.json`
+- `orders-pm.json`
 - `hl-markets.json`
 - `trending.json`
 - `arbs.json`
@@ -89,17 +93,39 @@ ARB
 
 ### 3. Positions
 
-- For each meaningful open position, show symbol, side, size, entry, PnL, and liquidation distance percent if available.
-- If there are no positions, show `No open positions.` only if this section is otherwise needed.
+- Merge HL and Polymarket positions into one `HOLDING` section.
+- Prefix each position line with `HL` or `PM`.
+- For HL positions, show symbol, side, size, entry, PnL, and liquidation distance percent if available.
+- For Polymarket positions, parse from the `data` array or a top-level array and use `title` or `question`, `outcome`, `size`, `avgPrice`, `currentPrice`, `pnl`, and `pnlPercent`.
+- If one venue has no positions, show only the other.
+- If both venues are empty, show `No open positions.`
 
 Terminal format:
 
 ```text
 HOLDING
-  BTC long 0.5 @ 69200 | PnL -516 (-1.5%) | liq 15.0% away
+  HL  BTC long 0.5 @ 69200 | PnL -516 (-1.5%) | liq 15.0% away
+  PM  SpaceX IPO Yes 100 shares @ $0.52 | PnL +$13.00 (+25.0%)
 ```
 
-### 4. Funding + OI
+### 4. Exposure
+
+- Add an `EXPOSURE` section between `HOLDING` and `WATCH`.
+- Calculate HL notional as the sum of `size * price` for HL positions.
+- Calculate PM invested as the sum of `size * avgPrice` for PM positions.
+- Show counts for each venue and the combined total.
+- Omit this section entirely when both venues have no positions.
+
+Terminal format:
+
+```text
+EXPOSURE
+  HL $34,600 notional (1 pos) | PM $52 invested (1 pos) | total $34,652
+```
+
+In markdown, render the same data as a small table.
+
+### 5. Funding + OI
 
 - Use `hl markets`.
 - Surface outlier funding rates, especially `abs(fundingRate) > 0.0001` (0.01%).
@@ -113,12 +139,12 @@ WATCH
   PEPE funding 0.025% | BTC OI heavy | SOL trend cooling
 ```
 
-### 5. Alerts
+### 6. Alerts
 
 - Show alerts only when any exist.
 - Omit the section when empty.
 
-### 6. Remaining Context
+### 7. Remaining Context
 
 - Use trending movers, new markets, and secondary news only in the markdown file unless there is spare line budget.
 
@@ -136,8 +162,9 @@ SESSION PREP  YYYY-MM-DD HH:MM UTC
   1. `HEADLINE x POSITION`
   2. `ARB`
   3. `HOLDING`
-  4. `WATCH`
-  5. `ALERTS`
+  4. `EXPOSURE`
+  5. `WATCH`
+  6. `ALERTS`
 - End with:
 
 ```text
@@ -148,7 +175,7 @@ Full briefing -> ~/docs/sessions/YYYY-MM-DD-HHMM.md
 
 ```text
 SESSION PREP  YYYY-MM-DD HH:MM UTC
-Data unavailable: positions (404), hl markets (...), trending (...), arbs (...), news (...), alerts (...)
+Data unavailable: positions (...), pm positions (...), pm orders (...), hl markets (...), trending (...), arbs (...), news (...), alerts (...)
 Full briefing -> ~/docs/sessions/YYYY-MM-DD-HHMM.md
 ```
 
@@ -163,6 +190,8 @@ Use this structure:
 
 ## Status
 - positions: ok | unavailable (...)
+- pm positions: ok | unavailable (...)
+- pm orders: ok | unavailable (...)
 - hl markets: ok | unavailable (...)
 - trending: ok | unavailable (...)
 - arbs: ok | unavailable (...)
@@ -173,13 +202,23 @@ Use this structure:
 [Paste the same compact findings shown in terminal, but without the line-limit pressure.]
 
 ## Positions
-[Full parsed position details, or None / unavailable.]
+[Merged HL and PM position details, or `No open positions.` / unavailable.]
+
+## Exposure
+[Small table with HL notional, PM invested, counts, and total. Omit entirely when both venues are empty.]
 
 ## News x Positions
 [Cross-referenced matches, then unmatched high-signal headlines.]
 
 ## Arbitrage
 [All actionable arbs with spreadPct > 5.]
+
+## Open Orders
+| Market | Side | Size | Price | Status |
+|--------|------|------|-------|--------|
+| SpaceX IPO Yes | Buy | 50 | $0.55 | Open |
+
+[Include this section only when `motion orders --json` returns open Polymarket orders. Omit it when empty or unavailable.]
 
 ## HL Markets
 [Key markets with price, 24h change, open interest, funding, leverage.]
@@ -200,6 +239,8 @@ Use this structure:
 - Infer the real array from the returned JSON instead of assuming one schema for every command.
 - Use the most specific field available:
   - positions: symbol, side, size, entry, leverage, pnl, liquidation price
+  - pm positions: commonly under `data` array. Use: title, question, outcome, size, avgPrice, currentPrice, pnl, pnlPercent
+  - pm orders: commonly under `data.orders` array. Use: market title, side, size, price, status
   - hl markets: `price`, `priceChange24h`, `openInterest`, `fundingRate`, `maxLeverage`
   - arbs: `outcomeLabel`, `minVenue`, `maxVenue`, `spreadPct`
   - news: `title`, `summary`, `content`, `sourceAuthor`, `publishedAt`
