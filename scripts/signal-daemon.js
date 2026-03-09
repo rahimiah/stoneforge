@@ -14,6 +14,10 @@ import {
   runLoop,
 } from './signal-daemon-lib.js';
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function printUsage() {
   process.stdout.write('Usage: signal-daemon <start|stop|status>\n');
 }
@@ -36,7 +40,7 @@ async function startCommand(paths, dependencies) {
   await runLoop(paths, config, dependencies);
 }
 
-function stopCommand(paths) {
+async function stopCommand(paths) {
   const pid = readPid(paths);
   if (!pid) {
     process.stdout.write('signal-daemon is not running\n');
@@ -50,6 +54,12 @@ function stopCommand(paths) {
   }
 
   process.kill(pid, 'SIGTERM');
+  const deadline = Date.now() + 5000;
+  while (isProcessRunning(pid) && Date.now() < deadline) {
+    await sleep(100);
+  }
+
+  clearRuntimeFiles(paths);
   process.stdout.write(`Stopped signal-daemon (pid=${pid})\n`);
 }
 
@@ -75,7 +85,7 @@ export async function runCli(argv = process.argv.slice(2), overrides = {}) {
       await startCommand(paths, dependencies);
       return;
     case 'stop':
-      stopCommand(paths);
+      await stopCommand(paths);
       return;
     case 'status':
       statusCommand(paths);

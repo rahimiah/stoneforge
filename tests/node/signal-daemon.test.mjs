@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 
 import {
   DEFAULT_CONFIG,
@@ -21,6 +23,17 @@ function makeTempHome() {
 
 function cleanupDir(dirPath) {
   fs.rmSync(dirPath, { recursive: true, force: true });
+}
+
+async function waitFor(check, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (check()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error('timed out waiting for condition');
 }
 
 test('ensureDefaultConfig creates default config.yaml', () => {
@@ -160,6 +173,115 @@ test('processPollCycle dedups, logs PASS/SKIP, and fail-opens on evaluator error
     assert.match(logContent, /PASS: evaluation unavailable/);
     assert.equal(notifications.length, 2);
     assert.equal(evaluations.length, 3);
+  } finally {
+    cleanupDir(homeDir);
+  }
+});
+
+test('CLI start/status/stop manages pid lifecycle', async () => {
+  const homeDir = makeTempHome();
+  try {
+    const binDir = path.join(homeDir, 'bin');
+    const paths = resolvePaths(homeDir);
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.mkdirSync(paths.sessionsDir, { recursive: true });
+    fs.writeFileSync(path.join(paths.sessionsDir, '2026-03-09-0900.md'), 'briefing', 'utf8');
+
+    fs.writeFileSync(
+      path.join(binDir, 'motion'),
+      `#!/bin/sh
+if [ "$1" = "arb" ]; then
+  printf '[]'
+else
+  printf '[]'
+fi
+`,
+      'utf8'
+    );
+    fs.writeFileSync(
+      path.join(binDir, 'claude'),
+      `#!/bin/sh
+printf 'PASS: stub pass\n'
+`,
+      'utf8'
+    );
+    fs.writeFileSync(
+      path.join(binDir, 'osascript'),
+      `#!/bin/sh
+exit 0
+`,
+      'utf8'
+    );
+    fs.chmodSync(path.join(binDir, 'motion'), 0o755);
+    fs.chmodSync(path.join(binDir, 'claude'), 0o755);
+    fs.chmodSync(path.join(binDir, 'osascript'), 0o755);
+
+    const env = {
+      ...process.env,
+      HOME: homeDir,
+      PATH: `${binDir}:${process.env.PATH}`,
+    };
+
+    const child = spawn(process.execPath, ['bin/signal-daemon', 'start'], {
+      cwd: path.resolve('.'),
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let startOutput = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => {
+      startOutput += chunk;
+    });
+
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('signal-daemon did not start')), 5000);
+      const checkStarted = () => {
+        if (startOutput.includes('signal-daemon running')) {
+          clearTimeout(timeout);
+          resolve();
+        }
+      };
+      child.stdout.on('data', checkStarted);
+      child.once('exit', (code) => {
+        clearTimeout(timeout);
+        reject(new Error(`signal-daemon exited early with code ${code}`));
+      });
+      checkStarted();
+    });
+
+    const pid = Number(fs.readFileSync(paths.pidPath, 'utf8').trim());
+    assert.equal(Number.isInteger(pid), true);
+    assert.equal(pid, child.pid);
+
+    const statusStdout = [];
+    const statusChild = spawn(process.execPath, ['bin/signal-daemon', 'status'], {
+      cwd: path.resolve('.'),
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    statusChild.stdout.setEncoding('utf8');
+    statusChild.stdout.on('data', (chunk) => statusStdout.push(chunk));
+    const [statusCode] = await once(statusChild, 'exit');
+    assert.equal(statusCode, 0);
+    assert.match(statusStdout.join(''), /signal-daemon running \| pid=\d+ \| uptime=\d+s \| processed=0 \| tier=active/);
+
+    const stopStdout = [];
+    const stopChild = spawn(process.execPath, ['bin/signal-daemon', 'stop'], {
+      cwd: path.resolve('.'),
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    stopChild.stdout.setEncoding('utf8');
+    stopChild.stdout.on('data', (chunk) => stopStdout.push(chunk));
+    const [stopCode] = await once(stopChild, 'exit');
+    assert.equal(stopCode, 0);
+    assert.match(stopStdout.join(''), new RegExp(`Stopped signal-daemon \\(pid=${pid}\\)`));
+
+    await waitFor(() => child.exitCode !== null);
+    assert.equal(child.exitCode, 0);
+    assert.equal(child.signalCode, null);
+    assert.equal(fs.existsSync(paths.pidPath), false);
   } finally {
     cleanupDir(homeDir);
   }
