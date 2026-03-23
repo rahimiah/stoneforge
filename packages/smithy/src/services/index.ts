@@ -302,3 +302,15 @@ export {
   // Factory
   createPostMergeRunner,
 } from './post-merge-runner.js';
+
+// Canary monitoring post-merge hook
+export {
+  // Types
+  type HealthCheckResult,
+  type CanaryMonitoringSummary,
+  type CanaryHookConfig,
+  // Implementation
+  CanaryHookImpl,
+  // Factory
+  createCanaryHook,
+} from './canary-hook.js';
