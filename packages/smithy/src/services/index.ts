@@ -290,6 +290,18 @@ export {
 // Post-merge runner service
 export {
   // Types
+  type DeployVerificationStatus,
+  type GitHubWorkflowRun,
+  type DeployVerifyHookResult,
+  type DeployVerifyHookConfig,
+  // Implementation
+  DeployVerifyHook,
+  // Factory
+  createDeployVerifyHook,
+} from './deploy-verify-hook.js';
+
+export {
+  // Types
   type PostMergeHook,
   type PostMergeContext,
   type PostMergeHookResult,
