@@ -115,6 +115,25 @@ export function mergeConfiguration(
       requiredChecks: partial.merge?.requiredChecks !== undefined ? partial.merge.requiredChecks : [...base.merge.requiredChecks],
       deleteBranchOnMerge: partial.merge?.deleteBranchOnMerge !== undefined ? partial.merge.deleteBranchOnMerge : base.merge.deleteBranchOnMerge,
     },
+    hooks: {
+      postMerge: {
+        releaseDocs: {
+          enabled: partial.hooks?.postMerge?.releaseDocs?.enabled !== undefined
+            ? partial.hooks.postMerge.releaseDocs.enabled
+            : base.hooks.postMerge.releaseDocs.enabled,
+        },
+        canary: {
+          enabled: partial.hooks?.postMerge?.canary?.enabled !== undefined
+            ? partial.hooks.postMerge.canary.enabled
+            : base.hooks.postMerge.canary.enabled,
+        },
+        deployVerification: {
+          enabled: partial.hooks?.postMerge?.deployVerification?.enabled !== undefined
+            ? partial.hooks.postMerge.deployVerification.enabled
+            : base.hooks.postMerge.deployVerification.enabled,
+        },
+      },
+    },
   };
   return result;
 }
@@ -201,6 +220,13 @@ export function cloneConfiguration(config: Configuration): Configuration {
       ciTimeoutMinutes: config.merge.ciTimeoutMinutes,
       requiredChecks: [...config.merge.requiredChecks],
       deleteBranchOnMerge: config.merge.deleteBranchOnMerge,
+    },
+    hooks: {
+      postMerge: {
+        releaseDocs: { enabled: config.hooks.postMerge.releaseDocs.enabled },
+        canary: { enabled: config.hooks.postMerge.canary.enabled },
+        deployVerification: { enabled: config.hooks.postMerge.deployVerification.enabled },
+      },
     },
   };
 }
@@ -336,6 +362,24 @@ export function diffConfigurations(
     diff.merge = mergeDiff;
   }
 
+  const hooksDiff: NonNullable<PartialConfiguration['hooks']> = {};
+  const postMergeDiff: NonNullable<NonNullable<PartialConfiguration['hooks']>['postMerge']> = {};
+  if (a.hooks.postMerge.releaseDocs.enabled !== b.hooks.postMerge.releaseDocs.enabled) {
+    postMergeDiff.releaseDocs = { enabled: b.hooks.postMerge.releaseDocs.enabled };
+  }
+  if (a.hooks.postMerge.canary.enabled !== b.hooks.postMerge.canary.enabled) {
+    postMergeDiff.canary = { enabled: b.hooks.postMerge.canary.enabled };
+  }
+  if (a.hooks.postMerge.deployVerification.enabled !== b.hooks.postMerge.deployVerification.enabled) {
+    postMergeDiff.deployVerification = { enabled: b.hooks.postMerge.deployVerification.enabled };
+  }
+  if (Object.keys(postMergeDiff).length > 0) {
+    hooksDiff.postMerge = postMergeDiff;
+  }
+  if (Object.keys(hooksDiff).length > 0) {
+    diff.hooks = hooksDiff;
+  }
+
   return diff;
 }
 
@@ -370,6 +414,9 @@ export function configurationsEqual(a: Configuration, b: Configuration): boolean
     a.merge.provider === b.merge.provider &&
     a.merge.ciTimeoutMinutes === b.merge.ciTimeoutMinutes &&
     JSON.stringify(a.merge.requiredChecks) === JSON.stringify(b.merge.requiredChecks) &&
-    a.merge.deleteBranchOnMerge === b.merge.deleteBranchOnMerge
+    a.merge.deleteBranchOnMerge === b.merge.deleteBranchOnMerge &&
+    a.hooks.postMerge.releaseDocs.enabled === b.hooks.postMerge.releaseDocs.enabled &&
+    a.hooks.postMerge.canary.enabled === b.hooks.postMerge.canary.enabled &&
+    a.hooks.postMerge.deployVerification.enabled === b.hooks.postMerge.deployVerification.enabled
   );
 }

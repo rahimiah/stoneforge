@@ -115,7 +115,7 @@ export interface MergeStewardConfig {
   readonly ciTimeoutMinutes?: number;
   /** Required check names for github-pr mode (defaults to all checks) */
   readonly requiredChecks?: readonly string[];
-  /** Post-merge hook runner invoked after successful merges */
+  /** Post-merge hook runner (defaults to config-driven runner) */
   readonly postMergeRunner?: PostMergeRunner;
 }
 

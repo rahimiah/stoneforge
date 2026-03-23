@@ -340,6 +340,29 @@ export function convertYamlToConfig(yamlConfig: YamlConfigFile): PartialConfigur
     }
   }
 
+  // Hooks section
+  if (yamlConfig.hooks?.post_merge) {
+    result.hooks = {
+      postMerge: {},
+    };
+
+    if (yamlConfig.hooks.post_merge.release_docs?.enabled !== undefined) {
+      result.hooks.postMerge!.releaseDocs = {
+        enabled: yamlConfig.hooks.post_merge.release_docs.enabled,
+      };
+    }
+    if (yamlConfig.hooks.post_merge.canary?.enabled !== undefined) {
+      result.hooks.postMerge!.canary = {
+        enabled: yamlConfig.hooks.post_merge.canary.enabled,
+      };
+    }
+    if (yamlConfig.hooks.post_merge.deploy_verification?.enabled !== undefined) {
+      result.hooks.postMerge!.deployVerification = {
+        enabled: yamlConfig.hooks.post_merge.deploy_verification.enabled,
+      };
+    }
+  }
+
   return result;
 }
 
@@ -504,6 +527,23 @@ export function convertConfigToYaml(config: Configuration | PartialConfiguration
     }
   }
 
+  // Hooks section
+  if (config.hooks?.postMerge) {
+    const postMerge: NonNullable<NonNullable<YamlConfigFile['hooks']>['post_merge']> = {};
+    if (config.hooks.postMerge.releaseDocs?.enabled !== undefined) {
+      postMerge.release_docs = { enabled: config.hooks.postMerge.releaseDocs.enabled };
+    }
+    if (config.hooks.postMerge.canary?.enabled !== undefined) {
+      postMerge.canary = { enabled: config.hooks.postMerge.canary.enabled };
+    }
+    if (config.hooks.postMerge.deployVerification?.enabled !== undefined) {
+      postMerge.deploy_verification = { enabled: config.hooks.postMerge.deployVerification.enabled };
+    }
+    if (Object.keys(postMerge).length > 0) {
+      result.hooks = { post_merge: postMerge };
+    }
+  }
+
   return result;
 }
 
@@ -566,6 +606,15 @@ export function updateConfigFile(
     project: updates.project ? { ...existing.project, ...updates.project } : existing.project,
     externalSync: updates.externalSync ? { ...existing.externalSync, ...updates.externalSync } : existing.externalSync,
     merge: updates.merge ? { ...existing.merge, ...updates.merge } : existing.merge,
+    hooks: updates.hooks
+      ? {
+        ...existing.hooks,
+        ...updates.hooks,
+        postMerge: updates.hooks.postMerge
+          ? { ...existing.hooks?.postMerge, ...updates.hooks.postMerge }
+          : existing.hooks?.postMerge,
+      }
+      : existing.hooks,
   };
 
   writeConfigFile(filePath, merged);

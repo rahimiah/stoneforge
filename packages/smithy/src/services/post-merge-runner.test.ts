@@ -4,9 +4,13 @@
  * Tests the runAndRemediate method and hook management for PostMergeRunner.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { clearConfigCache } from '@stoneforge/quarry';
 import type { PostMergeHook, PostMergeContext } from './post-merge-runner.js';
-import { PostMergeRunnerImpl } from './post-merge-runner.js';
+import { createPostMergeRunner, PostMergeRunnerImpl } from './post-merge-runner.js';
 
 // ============================================================================
 // Mocks
@@ -368,5 +372,87 @@ describe('PostMergeRunnerImpl', () => {
       expect(result.allSucceeded).toBe(true);
       expect(result.results[0].success).toBe(true);
     });
+  });
+});
+
+describe('createPostMergeRunner', () => {
+  afterEach(() => {
+    clearConfigCache();
+    vi.restoreAllMocks();
+  });
+
+  it('registers only enabled hooks from config', () => {
+    const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'smithy-hooks-'));
+    const configDir = path.join(workspaceRoot, '.stoneforge');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(configDir, 'config.yaml'),
+      `# Stoneforge Configuration
+
+database: stoneforge.db
+sync:
+  auto_export: true
+  export_debounce: 1000
+  elements_file: elements.jsonl
+  dependencies_file: dependencies.jsonl
+playbooks:
+  paths:
+    - .stoneforge/playbooks
+tombstone:
+  ttl: 30d
+  min_ttl: 7d
+identity:
+  mode: soft
+  time_tolerance: 5m
+project:
+  name: Stoneforge
+  color: "#2563eb"
+plugins:
+  packages: []
+external_sync:
+  enabled: false
+  poll_interval: 1m
+  conflict_strategy: last_write_wins
+  default_direction: bidirectional
+  auto_link: false
+merge:
+  provider: local
+  ci_timeout_minutes: 30
+  required_checks: []
+  delete_branch_on_merge: true
+hooks:
+  post_merge:
+    release_docs:
+      enabled: true
+    canary:
+      enabled: false
+    deploy_verification:
+      enabled: true
+`,
+      'utf8'
+    );
+
+    const api = createMockApi();
+    const releaseDocsFactory = vi.fn(() => ({ name: 'release-docs', execute: vi.fn() }));
+    const canaryFactory = vi.fn(() => ({ name: 'canary', execute: vi.fn() }));
+    const deployVerificationFactory = vi.fn(() => ({ name: 'deploy-verification', execute: vi.fn() }));
+
+    const runner = createPostMergeRunner(
+      api,
+      { workspaceRoot },
+      {
+        availableHooks: {
+          releaseDocs: releaseDocsFactory,
+          canary: canaryFactory,
+          deployVerification: deployVerificationFactory,
+        },
+      }
+    ) as PostMergeRunnerImpl;
+
+    expect(runner).toBeInstanceOf(PostMergeRunnerImpl);
+    expect(runner.getHooks().map((hook) => hook.name)).toEqual(['release-docs', 'deploy-verification']);
+    expect(releaseDocsFactory).toHaveBeenCalledOnce();
+    expect(canaryFactory).not.toHaveBeenCalled();
+    expect(deployVerificationFactory).toHaveBeenCalledOnce();
   });
 });

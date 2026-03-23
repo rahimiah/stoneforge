@@ -350,6 +350,13 @@ function createTrackedDefaults(): TrackedConfiguration {
       requiredChecks: { value: [...DEFAULT_CONFIG.merge.requiredChecks], source: ConfigSourceEnum.DEFAULT },
       deleteBranchOnMerge: { value: DEFAULT_CONFIG.merge.deleteBranchOnMerge, source: ConfigSourceEnum.DEFAULT },
     },
+    hooks: {
+      postMerge: {
+        releaseDocs: { value: DEFAULT_CONFIG.hooks.postMerge.releaseDocs.enabled, source: ConfigSourceEnum.DEFAULT },
+        canary: { value: DEFAULT_CONFIG.hooks.postMerge.canary.enabled, source: ConfigSourceEnum.DEFAULT },
+        deployVerification: { value: DEFAULT_CONFIG.hooks.postMerge.deployVerification.enabled, source: ConfigSourceEnum.DEFAULT },
+      },
+    },
   };
 }
 
@@ -437,6 +444,33 @@ function mergeTrackedConfig(
   }
   if (partial.merge?.deleteBranchOnMerge !== undefined) {
     result.merge = { ...result.merge, deleteBranchOnMerge: { value: partial.merge.deleteBranchOnMerge, source } };
+  }
+  if (partial.hooks?.postMerge?.releaseDocs?.enabled !== undefined) {
+    result.hooks = {
+      ...result.hooks,
+      postMerge: {
+        ...result.hooks.postMerge,
+        releaseDocs: { value: partial.hooks.postMerge.releaseDocs.enabled, source },
+      },
+    };
+  }
+  if (partial.hooks?.postMerge?.canary?.enabled !== undefined) {
+    result.hooks = {
+      ...result.hooks,
+      postMerge: {
+        ...result.hooks.postMerge,
+        canary: { value: partial.hooks.postMerge.canary.enabled, source },
+      },
+    };
+  }
+  if (partial.hooks?.postMerge?.deployVerification?.enabled !== undefined) {
+    result.hooks = {
+      ...result.hooks,
+      postMerge: {
+        ...result.hooks.postMerge,
+        deployVerification: { value: partial.hooks.postMerge.deployVerification.enabled, source },
+      },
+    };
   }
 
   return result;

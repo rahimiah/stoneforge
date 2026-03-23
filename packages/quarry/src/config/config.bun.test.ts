@@ -110,6 +110,10 @@ function createTestConfig(): Configuration {
       mode: IdentityMode.CRYPTOGRAPHIC,
       timeTolerance: 10 * ONE_MINUTE,
     },
+    project: {
+      name: 'Test Project',
+      color: '#2563eb',
+    },
     plugins: {
       packages: [],
     },
@@ -120,6 +124,19 @@ function createTestConfig(): Configuration {
       defaultDirection: 'bidirectional',
       autoLink: false,
       autoLinkProvider: undefined,
+    },
+    merge: {
+      provider: 'local',
+      ciTimeoutMinutes: 30,
+      requiredChecks: [],
+      deleteBranchOnMerge: true,
+    },
+    hooks: {
+      postMerge: {
+        releaseDocs: { enabled: false },
+        canary: { enabled: false },
+        deployVerification: { enabled: false },
+      },
     },
   };
 }
@@ -650,6 +667,22 @@ describe('YAML Handling', () => {
       const yaml = { identity: { mode: 'invalid' } };
       expect(() => convertYamlToConfig(yaml)).toThrow(ValidationError);
     });
+
+    test('converts hook enablement config', () => {
+      const yaml = {
+        hooks: {
+          post_merge: {
+            release_docs: { enabled: true },
+            canary: { enabled: false },
+            deploy_verification: { enabled: true },
+          },
+        },
+      };
+      const result = convertYamlToConfig(yaml);
+      expect(result.hooks?.postMerge?.releaseDocs?.enabled).toBe(true);
+      expect(result.hooks?.postMerge?.canary?.enabled).toBe(false);
+      expect(result.hooks?.postMerge?.deployVerification?.enabled).toBe(true);
+    });
   });
 
   describe('convertConfigToYaml', () => {
@@ -660,6 +693,16 @@ describe('YAML Handling', () => {
       expect(yaml.sync?.auto_export).toBe(false);
       expect(yaml.sync?.export_debounce).toBe(1000);
       expect(yaml.identity?.time_tolerance).toBe(10 * ONE_MINUTE);
+    });
+
+    test('serializes hook enablement to snake_case', () => {
+      const config = createTestConfig();
+      config.hooks.postMerge.releaseDocs.enabled = true;
+      config.hooks.postMerge.deployVerification.enabled = true;
+      const yaml = convertConfigToYaml(config);
+      expect(yaml.hooks?.post_merge?.release_docs?.enabled).toBe(true);
+      expect(yaml.hooks?.post_merge?.canary?.enabled).toBe(false);
+      expect(yaml.hooks?.post_merge?.deploy_verification?.enabled).toBe(true);
     });
   });
 
@@ -943,6 +986,12 @@ describe('Validation Constants', () => {
 
   test('default tombstone ttl is greater than minTtl', () => {
     expect(DEFAULT_CONFIG.tombstone.ttl).toBeGreaterThan(DEFAULT_CONFIG.tombstone.minTtl);
+  });
+
+  test('post-merge hooks default to disabled', () => {
+    expect(DEFAULT_CONFIG.hooks.postMerge.releaseDocs.enabled).toBe(false);
+    expect(DEFAULT_CONFIG.hooks.postMerge.canary.enabled).toBe(false);
+    expect(DEFAULT_CONFIG.hooks.postMerge.deployVerification.enabled).toBe(false);
   });
 });
 

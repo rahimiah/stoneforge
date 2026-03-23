@@ -16,6 +16,7 @@ import type {
   PluginsConfig,
   ExternalSyncConfig,
   MergeConfig,
+  HooksConfig,
 } from './types.js';
 
 // ============================================================================
@@ -112,6 +113,17 @@ export const DEFAULT_MERGE_CONFIG: MergeConfig = {
 };
 
 /**
+ * Default post-merge hooks configuration
+ */
+export const DEFAULT_HOOKS_CONFIG: HooksConfig = {
+  postMerge: {
+    releaseDocs: { enabled: false },
+    canary: { enabled: false },
+    deployVerification: { enabled: false },
+  },
+};
+
+/**
  * Complete default configuration
  */
 export const DEFAULT_CONFIG: Configuration = {
@@ -126,6 +138,7 @@ export const DEFAULT_CONFIG: Configuration = {
   plugins: DEFAULT_PLUGINS_CONFIG,
   externalSync: DEFAULT_EXTERNAL_SYNC_CONFIG,
   merge: DEFAULT_MERGE_CONFIG,
+  hooks: DEFAULT_HOOKS_CONFIG,
 };
 
 // ============================================================================
@@ -193,6 +206,13 @@ export function getDefaultConfig(): Configuration {
       ciTimeoutMinutes: DEFAULT_MERGE_CONFIG.ciTimeoutMinutes,
       requiredChecks: [...DEFAULT_MERGE_CONFIG.requiredChecks],
       deleteBranchOnMerge: DEFAULT_MERGE_CONFIG.deleteBranchOnMerge,
+    },
+    hooks: {
+      postMerge: {
+        releaseDocs: { enabled: DEFAULT_HOOKS_CONFIG.postMerge.releaseDocs.enabled },
+        canary: { enabled: DEFAULT_HOOKS_CONFIG.postMerge.canary.enabled },
+        deployVerification: { enabled: DEFAULT_HOOKS_CONFIG.postMerge.deployVerification.enabled },
+      },
     },
   };
 }

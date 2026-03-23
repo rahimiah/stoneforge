@@ -136,6 +136,34 @@ export interface MergeConfig {
 }
 
 /**
+ * Shared enabled flag for post-merge hooks.
+ */
+export interface PostMergeHookConfig {
+  /** Whether the hook should be registered and executed */
+  enabled: boolean;
+}
+
+/**
+ * Post-merge hook configuration.
+ */
+export interface PostMergeHooksConfig {
+  /** Generate release/changelog artifacts after merge */
+  releaseDocs: PostMergeHookConfig;
+  /** Monitor a canary health endpoint after merge */
+  canary: PostMergeHookConfig;
+  /** Run deploy verification checks after merge */
+  deployVerification: PostMergeHookConfig;
+}
+
+/**
+ * Hook system configuration.
+ */
+export interface HooksConfig {
+  /** Hooks that run after successful merges */
+  postMerge: PostMergeHooksConfig;
+}
+
+/**
  * Valid conflict strategy values
  */
 export const VALID_CONFLICT_STRATEGIES: readonly ExternalSyncConflictStrategy[] = [
@@ -196,6 +224,8 @@ export interface Configuration {
   externalSync: ExternalSyncConfig;
   /** Merge automation settings */
   merge: MergeConfig;
+  /** Post-merge hook settings */
+  hooks: HooksConfig;
 }
 
 /**
@@ -213,6 +243,9 @@ export type PartialConfiguration = {
   plugins?: Partial<PluginsConfig>;
   externalSync?: Partial<ExternalSyncConfig>;
   merge?: Partial<MergeConfig>;
+  hooks?: {
+    postMerge?: Partial<PostMergeHooksConfig>;
+  };
 };
 
 // ============================================================================
@@ -290,6 +323,13 @@ export interface TrackedConfiguration {
     requiredChecks: TrackedValue<string[]>;
     deleteBranchOnMerge: TrackedValue<boolean>;
   };
+  hooks: {
+    postMerge: {
+      releaseDocs: TrackedValue<boolean>;
+      canary: TrackedValue<boolean>;
+      deployVerification: TrackedValue<boolean>;
+    };
+  };
 }
 
 // ============================================================================
@@ -341,6 +381,19 @@ export interface YamlConfigFile {
     ci_timeout_minutes?: string | number;
     required_checks?: string[];
     delete_branch_on_merge?: boolean;
+  };
+  hooks?: {
+    post_merge?: {
+      release_docs?: {
+        enabled?: boolean;
+      };
+      canary?: {
+        enabled?: boolean;
+      };
+      deploy_verification?: {
+        enabled?: boolean;
+      };
+    };
   };
 }
 

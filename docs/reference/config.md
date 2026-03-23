@@ -70,6 +70,13 @@ interface Configuration {
     requiredChecks: string[];        // Required check names; empty = all reported checks
     deleteBranchOnMerge: boolean;    // Delete branch after merge (default: true)
   };
+  hooks: {
+    postMerge: {
+      releaseDocs: { enabled: boolean };        // Run release docs hook after merge (default: false)
+      canary: { enabled: boolean };             // Run canary hook after merge (default: false)
+      deployVerification: { enabled: boolean }; // Run deploy verification hook after merge (default: false)
+    };
+  };
 }
 ```
 
@@ -151,7 +158,10 @@ type ConfigPath =
   | 'merge.provider'
   | 'merge.ciTimeoutMinutes'
   | 'merge.requiredChecks'
-  | 'merge.deleteBranchOnMerge';
+  | 'merge.deleteBranchOnMerge'
+  | 'hooks.postMerge.releaseDocs.enabled'
+  | 'hooks.postMerge.canary.enabled'
+  | 'hooks.postMerge.deployVerification.enabled';
 ```
 
 ## Modifying Configuration
@@ -259,7 +269,26 @@ merge:
   ci_timeout_minutes: 30      # CI wait timeout (github-pr mode only)
   required_checks: []         # Required check names (empty = all checks)
   delete_branch_on_merge: true
+
+hooks:
+  post_merge:
+    release_docs:
+      enabled: false
+    canary:
+      enabled: false
+    deploy_verification:
+      enabled: false
 ```
+
+## Hooks
+
+Post-merge hooks allow merge automation to register follow-up tasks only when explicitly enabled in config.
+
+| Config Path | Type | Default | Description |
+|-------------|------|---------|-------------|
+| `hooks.postMerge.releaseDocs.enabled` | `boolean` | `false` | Whether to run the release documentation hook after a successful merge |
+| `hooks.postMerge.canary.enabled` | `boolean` | `false` | Whether to run the canary monitoring hook after a successful merge |
+| `hooks.postMerge.deployVerification.enabled` | `boolean` | `false` | Whether to run the deploy verification hook after a successful merge |
 
 ## Duration Strings
 

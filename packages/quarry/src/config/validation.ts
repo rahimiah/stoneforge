@@ -303,6 +303,16 @@ export function validateProjectColor(value: unknown): string {
   return value;
 }
 
+function validateHookEnabled(value: unknown, field: string): void {
+  if (typeof value !== 'boolean') {
+    throw new ValidationError(
+      `${field} must be a boolean`,
+      ErrorCode.INVALID_INPUT,
+      { field, value, expected: 'boolean' }
+    );
+  }
+}
+
 // ============================================================================
 // Full Configuration Validation
 // ============================================================================
@@ -553,6 +563,35 @@ export function validateConfiguration(config: unknown): Configuration {
     );
   }
 
+  // Validate hooks
+  if (typeof obj.hooks !== 'object' || obj.hooks === null) {
+    throw new ValidationError(
+      'Configuration must include hooks object',
+      ErrorCode.MISSING_REQUIRED_FIELD,
+      { field: 'hooks' }
+    );
+  }
+  const hooks = obj.hooks as Record<string, unknown>;
+  if (typeof hooks.postMerge !== 'object' || hooks.postMerge === null) {
+    throw new ValidationError(
+      'hooks.postMerge must be an object',
+      ErrorCode.MISSING_REQUIRED_FIELD,
+      { field: 'hooks.postMerge' }
+    );
+  }
+  const postMerge = hooks.postMerge as Record<string, unknown>;
+  for (const field of ['releaseDocs', 'canary', 'deployVerification'] as const) {
+    const hook = postMerge[field];
+    if (typeof hook !== 'object' || hook === null) {
+      throw new ValidationError(
+        `hooks.postMerge.${field} must be an object`,
+        ErrorCode.MISSING_REQUIRED_FIELD,
+        { field: `hooks.postMerge.${field}` }
+      );
+    }
+    validateHookEnabled((hook as Record<string, unknown>).enabled, `hooks.postMerge.${field}.enabled`);
+  }
+
   return config as Configuration;
 }
 
@@ -707,6 +746,18 @@ export function validatePartialConfiguration(config: PartialConfiguration): void
         ErrorCode.INVALID_INPUT,
         { field: 'merge.deleteBranchOnMerge', value: config.merge.deleteBranchOnMerge, expected: 'boolean' }
       );
+    }
+  }
+  if (config.hooks?.postMerge !== undefined) {
+    const postMerge = config.hooks.postMerge;
+    if (postMerge.releaseDocs?.enabled !== undefined) {
+      validateHookEnabled(postMerge.releaseDocs.enabled, 'hooks.postMerge.releaseDocs.enabled');
+    }
+    if (postMerge.canary?.enabled !== undefined) {
+      validateHookEnabled(postMerge.canary.enabled, 'hooks.postMerge.canary.enabled');
+    }
+    if (postMerge.deployVerification?.enabled !== undefined) {
+      validateHookEnabled(postMerge.deployVerification.enabled, 'hooks.postMerge.deployVerification.enabled');
     }
   }
 }

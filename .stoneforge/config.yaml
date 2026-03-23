@@ -12,3 +12,11 @@ playbooks:
     - playbooks
 identity:
   mode: soft
+hooks:
+  post_merge:
+    release_docs:
+      enabled: false
+    canary:
+      enabled: false
+    deploy_verification:
+      enabled: false

@@ -11,9 +11,10 @@
  * @module
  */
 
+import * as path from 'node:path';
 import type { Task, ElementId, EntityId } from '@stoneforge/core';
 import { TaskStatus, createTask } from '@stoneforge/core';
-import type { QuarryAPI } from '@stoneforge/quarry';
+import { loadConfig, type QuarryAPI } from '@stoneforge/quarry';
 import { createLogger } from '../utils/logger.js';
 
 const logger = createLogger('post-merge-runner');
@@ -124,6 +125,17 @@ export interface PostMergeRunnerConfig {
   /** Timeout per hook in ms (default: 60000 — 1 minute) */
   readonly hookTimeoutMs?: number;
 }
+
+export type BuiltInPostMergeHookName = 'releaseDocs' | 'canary' | 'deployVerification';
+
+export type PostMergeHookFactory = () => PostMergeHook;
+
+export interface CreatePostMergeRunnerOptions {
+  readonly configPath?: string;
+  readonly availableHooks?: Partial<Record<BuiltInPostMergeHookName, PostMergeHookFactory>>;
+}
+
+export const BUILT_IN_POST_MERGE_HOOKS: CreatePostMergeRunnerOptions['availableHooks'] = {};
 
 // ============================================================================
 // PostMergeRunner Interface
@@ -378,7 +390,28 @@ export class PostMergeRunnerImpl implements PostMergeRunner {
  */
 export function createPostMergeRunner(
   api: QuarryAPI,
-  config: PostMergeRunnerConfig
+  config: PostMergeRunnerConfig,
+  options: CreatePostMergeRunnerOptions = {}
 ): PostMergeRunner {
-  return new PostMergeRunnerImpl(api, config);
+  const runner = new PostMergeRunnerImpl(api, config);
+  const configPath = options.configPath ?? path.join(config.workspaceRoot, '.stoneforge', 'config.yaml');
+  const loadedConfig = loadConfig({ configPath });
+  const availableHooks = options.availableHooks ?? BUILT_IN_POST_MERGE_HOOKS ?? {};
+
+  for (const [hookName, hookConfig] of Object.entries(loadedConfig.hooks.postMerge) as Array<
+    [BuiltInPostMergeHookName, (typeof loadedConfig.hooks.postMerge)[BuiltInPostMergeHookName]]
+  >) {
+    if (!hookConfig.enabled) {
+      continue;
+    }
+
+    const createHook = availableHooks[hookName];
+    if (!createHook) {
+      continue;
+    }
+
+    runner.registerHook(createHook());
+  }
+
+  return runner;
 }

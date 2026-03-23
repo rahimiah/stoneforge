@@ -29,6 +29,7 @@ import {
   type MergeStewardConfig,
   type MergeStrategy,
 } from './merge-steward-service.js';
+import type { PostMergeRunner } from './post-merge-runner.js';
 
 // Mock node:child_process for attemptMerge git command tests (vitest only)
 // IMPORTANT: These mocks are ONLY applied in vitest. In bun test, vi.mock
@@ -1373,6 +1374,7 @@ describe('MergeStewardService', () => {
         metadata: {
           orchestrator: {
             branch: 'agent/worker/task-branch',
+            worktree: '.stoneforge/.worktrees/worker-test',
             assignedAgent: 'agent-worker-001',
             mergeStatus: 'pending',
           },
