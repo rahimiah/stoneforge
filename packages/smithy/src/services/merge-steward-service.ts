@@ -46,6 +46,10 @@ import { ReleaseDocsHook, type MergedTaskContext } from '../git/post-merge-hooks
 import type { AgentRegistry } from './agent-registry.js';
 import { createLogger } from '../utils/logger.js';
 import type { OperationLogService } from './operation-log-service.js';
+import {
+  createPostMergeRunner,
+  type PostMergeRunner,
+} from './post-merge-runner.js';
 
 const logger = createLogger('merge-steward');
 
@@ -111,6 +115,8 @@ export interface MergeStewardConfig {
   readonly ciTimeoutMinutes?: number;
   /** Required check names for github-pr mode (defaults to all checks) */
   readonly requiredChecks?: readonly string[];
+  /** Post-merge hook runner invoked after successful merges */
+  readonly postMergeRunner?: PostMergeRunner;
 }
 
 /**
@@ -362,6 +368,7 @@ const DEFAULT_CONFIG = {
   mergeProvider: 'local' as const,
   ciTimeoutMinutes: 30,
   requiredChecks: [] as readonly string[],
+  postMergeRunner: undefined as PostMergeRunner | undefined,
 } as const;
 
 /**
@@ -369,14 +376,15 @@ const DEFAULT_CONFIG = {
  */
 export class MergeStewardServiceImpl implements MergeStewardService {
   private readonly api: QuarryAPI;
-  private readonly config: Required<Omit<MergeStewardConfig, 'targetBranch' | 'stewardEntityId'>> &
-    Pick<MergeStewardConfig, 'targetBranch' | 'stewardEntityId'>;
+  private readonly config: Required<Omit<MergeStewardConfig, 'targetBranch' | 'stewardEntityId' | 'postMergeRunner'>> &
+    Pick<MergeStewardConfig, 'targetBranch' | 'stewardEntityId' | 'postMergeRunner'>;
   private readonly taskAssignment: TaskAssignmentService;
   private readonly dispatchService: DispatchService;
   private readonly worktreeManager: WorktreeManager | undefined;
   private readonly agentRegistry: AgentRegistry;
   private readonly operationLog: OperationLogService | undefined;
   private readonly githubMergeProvider: GitHubMergeProvider | undefined;
+  private readonly postMergeRunner: PostMergeRunner;
   private targetBranch: string | undefined;
 
   constructor(
@@ -400,6 +408,10 @@ export class MergeStewardServiceImpl implements MergeStewardService {
       ...DEFAULT_CONFIG,
       ...config,
     };
+    this.postMergeRunner = config.postMergeRunner ?? createPostMergeRunner(this.api, {
+      workspaceRoot: this.config.workspaceRoot,
+      entityId: this.config.stewardEntityId,
+    });
   }
 
   // ----------------------------------------
@@ -624,6 +636,8 @@ export class MergeStewardServiceImpl implements MergeStewardService {
       this.operationLog?.write('info', 'merge', `Task ${taskId} merged successfully`, { taskId, commitHash: mergeResult.commitHash });
       await this.updateMergeStatus(taskId, 'merged', { testResult });
 
+      await this.runPostMergeHooks(task, mergeResult.commitHash ?? '');
+
       // 5. Cleanup worktree if auto-cleanup enabled
       if (this.config.autoCleanup) {
         await this.cleanupAfterMerge(taskId, this.config.deleteBranchAfterMerge);
@@ -758,6 +772,9 @@ export class MergeStewardServiceImpl implements MergeStewardService {
       deleteBranch: this.config.deleteBranchAfterMerge,
     });
     await this.updateMergeStatus(taskId, 'merged');
+
+    const mergeCommitSha = await this.resolveTargetBranchHeadSha(`github-pr:${id}`);
+    await this.runPostMergeHooks(task, mergeCommitSha);
 
     if (this.config.autoCleanup) {
       await this.cleanupAfterMerge(taskId, this.config.deleteBranchAfterMerge);
@@ -1349,6 +1366,85 @@ export class MergeStewardServiceImpl implements MergeStewardService {
       this.config.targetBranch
     );
     return this.targetBranch;
+  }
+
+  private async runPostMergeHooks(task: Task, commitSha: string): Promise<void> {
+    const orchestratorMeta = getOrchestratorTaskMeta(
+      task.metadata as Record<string, unknown>
+    );
+
+    if (!orchestratorMeta?.branch) {
+      return;
+    }
+
+    try {
+      const context = {
+        commitSha,
+        changedFiles: await this.getChangedFilesForCommit(commitSha),
+        sourceBranch: orchestratorMeta.branch,
+        targetBranch: await this.getTargetBranch(),
+        workspaceRoot: this.config.workspaceRoot,
+        taskId: task.id,
+      };
+      const result = await this.postMergeRunner.runAndRemediate(context);
+
+      if (!result.allSucceeded) {
+        this.operationLog?.write('warn', 'merge', `Post-merge hooks failed for task ${task.id}`, {
+          taskId: task.id,
+          hookResults: result.results,
+        });
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error(`Post-merge hook runner crashed for task ${task.id}: ${errorMessage}`);
+      this.operationLog?.write('warn', 'merge', `Post-merge hook runner crashed for task ${task.id}`, {
+        taskId: task.id,
+        error: errorMessage,
+      });
+    }
+  }
+
+  private async getChangedFilesForCommit(commitSha: string): Promise<readonly string[]> {
+    if (!commitSha) {
+      return [];
+    }
+
+    try {
+      const { stdout } = await execAsync(
+        `git diff-tree --no-commit-id --name-only -r ${commitSha}`,
+        { cwd: this.config.workspaceRoot, encoding: 'utf8' }
+      );
+      return stdout
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+    } catch {
+      return [];
+    }
+  }
+
+  private async resolveTargetBranchHeadSha(fallback: string): Promise<string> {
+    const targetBranch = await this.getTargetBranch();
+
+    try {
+      const remoteExists = await hasRemote(this.config.workspaceRoot);
+      const ref = remoteExists ? `origin/${targetBranch}` : targetBranch;
+
+      if (remoteExists) {
+        await execAsync('git fetch origin', {
+          cwd: this.config.workspaceRoot,
+          encoding: 'utf8',
+        });
+      }
+
+      const { stdout } = await execAsync(`git rev-parse ${ref}`, {
+        cwd: this.config.workspaceRoot,
+        encoding: 'utf8',
+      });
+      return stdout.trim() || fallback;
+    } catch {
+      return fallback;
+    }
   }
 }
 

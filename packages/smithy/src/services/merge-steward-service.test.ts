@@ -19,6 +19,7 @@ import type { DispatchService } from './dispatch-service.js';
 import type { GitHubMergeProvider } from './merge-request-provider.js';
 import type { WorktreeManager, WorktreeInfo } from '../git/worktree-manager.js';
 import type { AgentRegistry } from './agent-registry.js';
+import type { PostMergeRunner } from './post-merge-runner.js';
 
 import {
   MergeStewardServiceImpl,
@@ -356,6 +357,41 @@ describe('MergeStewardService', () => {
         dispatchService,
         agentRegistry,
         configNoPush
+      );
+      expect(svc).toBeDefined();
+    });
+
+    it('should accept a custom post-merge runner', () => {
+      const postMergeRunner = {
+        registerHook: vi.fn(),
+        removeHook: vi.fn(),
+        getHooks: vi.fn().mockReturnValue([]),
+        runAndRemediate: vi.fn().mockResolvedValue({
+          allSucceeded: true,
+          totalHooks: 0,
+          successCount: 0,
+          failureCount: 0,
+          results: [],
+          context: {
+            commitSha: 'abc123',
+            changedFiles: [],
+            sourceBranch: 'feature/test',
+            targetBranch: 'main',
+            workspaceRoot: '/project',
+          },
+          durationMs: 0,
+        }),
+      } as unknown as PostMergeRunner;
+      const svc = createMergeStewardService(
+        api,
+        taskAssignment,
+        dispatchService,
+        agentRegistry,
+        {
+          ...config,
+          postMergeRunner,
+        },
+        worktreeManager
       );
       expect(svc).toBeDefined();
     });
@@ -1330,6 +1366,94 @@ describe('MergeStewardService', () => {
       expect(result.merged).toBe(false);
       expect(api.update).not.toHaveBeenCalled();
     });
+
+    it('runs post-merge hooks after a successful local merge', async () => {
+      const mockTask = createMockTask({
+        status: TaskStatus.REVIEW,
+        metadata: {
+          orchestrator: {
+            branch: 'agent/worker/task-branch',
+            assignedAgent: 'agent-worker-001',
+            mergeStatus: 'pending',
+          },
+        },
+      });
+      const postMergeRunner = {
+        registerHook: vi.fn(),
+        removeHook: vi.fn(),
+        getHooks: vi.fn().mockReturnValue([]),
+        runAndRemediate: vi.fn().mockResolvedValue({
+          allSucceeded: true,
+          totalHooks: 0,
+          successCount: 0,
+          failureCount: 0,
+          results: [],
+          context: {
+            commitSha: 'abc123',
+            changedFiles: ['src/index.ts'],
+            sourceBranch: 'agent/worker/task-branch',
+            targetBranch: 'main',
+            workspaceRoot: '/project',
+            taskId: mockTask.id,
+          },
+          durationMs: 5,
+        }),
+      } as unknown as PostMergeRunner;
+      const hookAwareService = createMergeStewardService(
+        api,
+        taskAssignment,
+        dispatchService,
+        agentRegistry,
+        {
+          ...config,
+          postMergeRunner,
+        },
+        worktreeManager
+      ) as MergeStewardServiceImpl;
+
+      (api.get as MockInstance).mockResolvedValue(mockTask);
+      vi.spyOn(hookAwareService as unknown as { branchHasCommitsAhead: (branch: string) => Promise<boolean> }, 'branchHasCommitsAhead')
+        .mockResolvedValue(true);
+      vi.spyOn(hookAwareService, 'updateMergeStatus').mockResolvedValue(mockTask);
+      vi.spyOn(hookAwareService, 'attemptMerge').mockResolvedValue({
+        success: true,
+        commitHash: 'abc123',
+        hasConflict: false,
+      });
+      vi.spyOn(hookAwareService, 'cleanupAfterMerge').mockResolvedValue(true);
+
+      const cp = await import('node:child_process');
+      (cp.exec as unknown as MockInstance).mockImplementation(
+        (cmd: string, _opts: unknown, cb?: Function) => {
+          const callback = typeof _opts === 'function' ? (_opts as unknown as Function) : cb;
+          if (!callback) return;
+          if (cmd.includes('diff-tree --no-commit-id --name-only -r abc123')) {
+            callback(null, { stdout: 'src/index.ts\n', stderr: '' });
+            return;
+          }
+          if (cmd.includes('remote get-url')) {
+            callback(new Error('no remote'), { stdout: '', stderr: '' });
+            return;
+          }
+          callback(null, { stdout: '', stderr: '' });
+        }
+      );
+
+      const result = await hookAwareService.processTask(mockTask.id, { skipTests: true });
+
+      expect(result.status).toBe('merged');
+      expect(result.merged).toBe(true);
+      expect((postMergeRunner.runAndRemediate as MockInstance)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          commitSha: 'abc123',
+          changedFiles: ['src/index.ts'],
+          sourceBranch: 'agent/worker/task-branch',
+          targetBranch: 'main',
+          workspaceRoot: config.workspaceRoot,
+          taskId: mockTask.id,
+        })
+      );
+    });
   });
 
   describe('processTask (github-pr mode)', () => {
@@ -1490,6 +1614,116 @@ describe('MergeStewardService', () => {
               mergeStatus: 'ci_failed',
             }),
           }),
+        })
+      );
+    });
+
+    it('runs post-merge hooks after a successful GitHub PR merge', async () => {
+      const postMergeRunner = {
+        registerHook: vi.fn(),
+        removeHook: vi.fn(),
+        getHooks: vi.fn().mockReturnValue([]),
+        runAndRemediate: vi.fn().mockResolvedValue({
+          allSucceeded: true,
+          totalHooks: 0,
+          successCount: 0,
+          failureCount: 0,
+          results: [],
+          context: {
+            commitSha: 'def456',
+            changedFiles: ['README.md'],
+            sourceBranch: 'agent/worker/task-branch',
+            targetBranch: 'main',
+            workspaceRoot: '/project',
+          },
+          durationMs: 8,
+        }),
+      } as unknown as PostMergeRunner;
+      const githubProvider = {
+        name: 'github-pr',
+        createMergeRequest: vi.fn(),
+        waitForChecks: vi.fn().mockResolvedValue({
+          status: 'passed',
+          checks: [{ name: 'test-suite', conclusion: 'success' }],
+          failingChecks: [],
+        }),
+        mergeViaPr: vi.fn().mockResolvedValue(undefined),
+      } as unknown as GitHubMergeProvider;
+
+      const githubService = createMergeStewardService(
+        api,
+        taskAssignment,
+        dispatchService,
+        agentRegistry,
+        {
+          ...createDefaultConfig(),
+          mergeProvider: 'github-pr',
+          postMergeRunner,
+        },
+        worktreeManager,
+        undefined,
+        githubProvider
+      );
+
+      const reviewTask = createMockTask({
+        status: TaskStatus.REVIEW,
+        metadata: {
+          orchestrator: {
+            branch: 'agent/worker/task-branch',
+            mergeStatus: 'ci_pending',
+            mergeRequestId: 101,
+          },
+        },
+      });
+
+      (api.get as MockInstance).mockResolvedValue(reviewTask);
+      (api.update as MockInstance).mockImplementation((_id, updates) =>
+        Promise.resolve({ ...reviewTask, ...updates } as Task)
+      );
+      (worktreeManager.getDefaultBranch as MockInstance).mockResolvedValue('main');
+
+      const cp = await import('node:child_process');
+      (cp.exec as unknown as MockInstance).mockImplementation(
+        (cmd: string, _opts: unknown, cb?: Function) => {
+          const callback = typeof _opts === 'function' ? (_opts as unknown as Function) : cb;
+          if (!callback) return;
+          if (cmd.includes('rev-list --count')) {
+            callback(null, { stdout: '2\n', stderr: '' });
+            return;
+          }
+          if (cmd.includes('remote get-url')) {
+            callback(null, { stdout: 'origin\n', stderr: '' });
+            return;
+          }
+          if (cmd.includes('git fetch origin')) {
+            callback(null, { stdout: '', stderr: '' });
+            return;
+          }
+          if (cmd.includes('git rev-parse origin/main')) {
+            callback(null, { stdout: 'def456\n', stderr: '' });
+            return;
+          }
+          if (cmd.includes('diff-tree --no-commit-id --name-only -r def456')) {
+            callback(null, { stdout: 'README.md\n', stderr: '' });
+            return;
+          }
+          callback(null, { stdout: '', stderr: '' });
+        }
+      );
+
+      const result = await githubService.processTask(reviewTask.id);
+
+      expect(result.status).toBe('merged');
+      expect(result.merged).toBe(true);
+      expect(githubProvider.mergeViaPr).toHaveBeenCalledWith(101, { deleteBranch: true });
+      expect((postMergeRunner.runAndRemediate as MockInstance)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          commitSha: 'def456',
+          changedFiles: ['README.md'],
+          sourceBranch: 'agent/worker/task-branch',
+          targetBranch: 'main',
+          workspaceRoot: '/project',
+          taskId: reviewTask.id,
         })
       );
     });

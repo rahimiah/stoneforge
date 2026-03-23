@@ -304,6 +304,7 @@ export {
   // Types
   type PostMergeHook,
   type PostMergeContext,
+  type HookResult,
   type PostMergeHookResult,
   type HookExecutionResult,
   type RunAndRemediateResult,

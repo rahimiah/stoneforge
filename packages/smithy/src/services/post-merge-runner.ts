@@ -69,6 +69,11 @@ export interface PostMergeHookResult {
 }
 
 /**
+ * Backward-compatible alias for the public hook result contract.
+ */
+export type HookResult = PostMergeHookResult;
+
+/**
  * Result of a single hook execution within runAndRemediate.
  */
 export interface HookExecutionResult {
