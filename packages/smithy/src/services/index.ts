@@ -286,3 +286,19 @@ export {
   // Factory
   createMetricsService,
 } from './metrics-service.js';
+
+// Post-merge runner service
+export {
+  // Types
+  type PostMergeHook,
+  type PostMergeContext,
+  type PostMergeHookResult,
+  type HookExecutionResult,
+  type RunAndRemediateResult,
+  type PostMergeRunnerConfig,
+  type PostMergeRunner,
+  // Implementation
+  PostMergeRunnerImpl,
+  // Factory
+  createPostMergeRunner,
+} from './post-merge-runner.js';
