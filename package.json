@@ -14,7 +14,8 @@
     "dev:smithy": "turbo run dev --filter=@stoneforge/smithy-server --filter=@stoneforge/smithy-web",
     "dev:platform": "turbo run dev --filter=@stoneforge/quarry-server --filter=@stoneforge/quarry-web",
     "postinstall": "node packages/smithy/scripts/fix-node-pty-permissions.cjs",
-    "release": "bun run scripts/release.ts"
+    "release": "bun run scripts/release.ts",
+    "retro": "bun run scripts/retro.ts"
   },
   "packageManager": "pnpm@8.15.5",
   "engines": {
