@@ -42,6 +42,7 @@ import type { DispatchService } from './dispatch-service.js';
 import type { GitHubMergeProvider } from './merge-request-provider.js';
 import type { WorktreeManager } from '../git/worktree-manager.js';
 import { mergeBranch, hasRemote, detectTargetBranch } from '../git/merge.js';
+import { ReleaseDocsHook, type MergedTaskContext } from '../git/post-merge-hooks.js';
 import type { AgentRegistry } from './agent-registry.js';
 import { createLogger } from '../utils/logger.js';
 import type { OperationLogService } from './operation-log-service.js';
@@ -989,7 +990,9 @@ export class MergeStewardServiceImpl implements MergeStewardService {
     commitMessage?: string
   ): Promise<MergeAttemptResult> {
     // Get task info
-    const task = await this.api.get<Task>(taskId);
+    const task = await this.api.get<Task & { description?: string }>(taskId, {
+      hydrate: { description: true },
+    });
     if (!task) {
       return {
         success: false,
@@ -1016,6 +1019,17 @@ export class MergeStewardServiceImpl implements MergeStewardService {
       ? `${task.title} (${taskId})`
       : `Merge branch '${sourceBranch}' (Task: ${taskId})`;
 
+    const taskContext: MergedTaskContext = {
+      id: task.id,
+      title: task.title,
+      description: task.description,
+      acceptanceCriteria: task.acceptanceCriteria,
+      tags: task.tags,
+      taskType: task.taskType,
+      priority: task.priority,
+      complexity: task.complexity,
+    };
+
     return mergeBranch({
       workspaceRoot: this.config.workspaceRoot,
       sourceBranch,
@@ -1025,6 +1039,8 @@ export class MergeStewardServiceImpl implements MergeStewardService {
       commitMessage: commitMessage ?? defaultMessage,
       preflight: true,
       syncLocal: true,
+      postMergeHooks: [new ReleaseDocsHook()],
+      taskContext,
     });
   }
 

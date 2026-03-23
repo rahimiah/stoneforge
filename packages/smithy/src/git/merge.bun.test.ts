@@ -11,6 +11,7 @@ import * as path from 'node:path';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mergeBranch, detectTargetBranch, execGitSafe, hasRemote, syncLocalBranchFromCommit } from './merge.js';
+import type { GitPostMergeHook } from './post-merge-hooks.js';
 
 const execAsync = promisify(exec);
 
@@ -354,6 +355,119 @@ describe('mergeBranch', () => {
       const { stdout: worktrees } = await execAsync('git worktree list', { cwd: repoDir });
       const lines = worktrees.trim().split('\n');
       expect(lines.length).toBe(1);
+    } finally {
+      cleanup(repoDir, remoteDir);
+    }
+  });
+
+  test('runs post-merge hooks and amends the merge commit with generated files', async () => {
+    const { repoDir, remoteDir } = await setup();
+    try {
+      await execAsync('git checkout -b feature/release-docs', { cwd: repoDir });
+      fs.writeFileSync(path.join(repoDir, 'release.ts'), 'export const release = true;\n');
+      await execAsync('git add . && git commit -m "Release docs source"', { cwd: repoDir });
+      await execAsync('git push origin feature/release-docs', { cwd: repoDir });
+      await execAsync('git checkout main', { cwd: repoDir });
+
+      const result = await mergeBranch({
+        workspaceRoot: repoDir,
+        sourceBranch: 'feature/release-docs',
+        targetBranch: 'main',
+        commitMessage: 'docs: merge release docs',
+        syncLocal: false,
+        postMergeHooks: [
+          {
+            name: 'write-release-doc',
+            async run(context) {
+              fs.mkdirSync(path.join(context.mergeWorktreePath, 'docs', 'changelog'), { recursive: true });
+              fs.writeFileSync(
+                path.join(context.mergeWorktreePath, 'docs', 'changelog', 'generated.md'),
+                `# ${context.task?.title ?? 'Generated'}\n`,
+                'utf8'
+              );
+              return { hookName: 'write-release-doc', success: true, filesChanged: ['docs/changelog/generated.md'] };
+            },
+          },
+        ],
+        taskContext: {
+          id: 'el-1pk2',
+          title: 'Release documentation post-merge hook',
+          description: 'Generated from merge metadata.',
+          acceptanceCriteria: '',
+          tags: ['docs'],
+          taskType: 'feature',
+          priority: 3,
+          complexity: 3,
+        },
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.hookResults).toEqual([
+        {
+          hookName: 'write-release-doc',
+          success: true,
+          filesChanged: ['docs/changelog/generated.md'],
+        },
+      ]);
+
+      const { stdout: remoteFiles } = await execAsync(
+        `git --git-dir="${remoteDir}" ls-tree --name-only -r main`
+      );
+      expect(remoteFiles).toContain('docs/changelog/generated.md');
+    } finally {
+      cleanup(repoDir, remoteDir);
+    }
+  });
+
+  test('continues running later post-merge hooks when an earlier hook fails', async () => {
+    const { repoDir, remoteDir } = await setup();
+    try {
+      await execAsync('git checkout -b feature/hook-failure', { cwd: repoDir });
+      fs.writeFileSync(path.join(repoDir, 'hook.ts'), 'export const hook = true;\n');
+      await execAsync('git add . && git commit -m "Hook failure source"', { cwd: repoDir });
+      await execAsync('git push origin feature/hook-failure', { cwd: repoDir });
+      await execAsync('git checkout main', { cwd: repoDir });
+
+      const executionOrder: string[] = [];
+      const hooks: GitPostMergeHook[] = [
+        {
+          name: 'fail-first',
+          async run() {
+            executionOrder.push('fail-first');
+            throw new Error('boom');
+          },
+        },
+        {
+          name: 'run-second',
+          async run(context) {
+            executionOrder.push('run-second');
+            fs.writeFileSync(path.join(context.mergeWorktreePath, 'after-failure.txt'), 'still ran\n', 'utf8');
+            return { hookName: 'run-second', success: true, filesChanged: ['after-failure.txt'] };
+          },
+        },
+      ];
+
+      const result = await mergeBranch({
+        workspaceRoot: repoDir,
+        sourceBranch: 'feature/hook-failure',
+        targetBranch: 'main',
+        commitMessage: 'docs: hook failure handling',
+        syncLocal: false,
+        postMergeHooks: hooks,
+      });
+
+      expect(result.success).toBe(true);
+      expect(executionOrder).toEqual(['fail-first', 'run-second']);
+      expect(result.hookResults?.[0]).toEqual({
+        hookName: 'fail-first',
+        success: false,
+        error: 'boom',
+      });
+      expect(result.hookResults?.[1]).toEqual({
+        hookName: 'run-second',
+        success: true,
+        filesChanged: ['after-failure.txt'],
+      });
     } finally {
       cleanup(repoDir, remoteDir);
     }

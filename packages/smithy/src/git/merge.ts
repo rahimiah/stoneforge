@@ -25,6 +25,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
+import type {
+  MergedTaskContext,
+  GitPostMergeHook,
+  GitPostMergeHookResult,
+} from './post-merge-hooks.js';
+
 const execAsync = promisify(exec);
 
 // ============================================================================
@@ -53,6 +59,10 @@ export interface MergeBranchOptions {
    * Auto-detected when no remote named 'origin' is configured.
    */
   localOnly?: boolean;
+  /** Optional post-merge hooks run after the merge commit and before push */
+  postMergeHooks?: GitPostMergeHook[];
+  /** Optional merged task context passed through to post-merge hooks */
+  taskContext?: MergedTaskContext;
 }
 
 export interface MergeBranchResult {
@@ -68,6 +78,8 @@ export interface MergeBranchResult {
   conflictFiles?: string[];
   /** Whether the source branch was already fully merged into the target (zero commits ahead) */
   alreadyMerged?: boolean;
+  /** Post-merge hook execution results */
+  hookResults?: GitPostMergeHookResult[];
 }
 
 // ============================================================================
@@ -216,6 +228,8 @@ export async function mergeBranch(options: MergeBranchOptions): Promise<MergeBra
     commitMessage,
     preflight = true,
     syncLocal = true,
+    postMergeHooks = [],
+    taskContext,
   } = options;
 
   // Auto-detect local-only mode when no remote is configured
@@ -323,6 +337,38 @@ export async function mergeBranch(options: MergeBranchOptions): Promise<MergeBra
       commitHash = hash.trim();
     }
 
+    const hookResults: GitPostMergeHookResult[] = [];
+    for (const hook of postMergeHooks) {
+      try {
+        hookResults.push(
+          await hook.run({
+            workspaceRoot,
+            mergeWorktreePath: mergeDir,
+            sourceBranch,
+            targetBranch,
+            commitMessage: message,
+            commitHash,
+            mergedAt: new Date().toISOString(),
+            task: taskContext,
+          })
+        );
+      } catch (error) {
+        hookResults.push({
+          hookName: hook.name,
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    const { stdout: status } = await execGitSafe('status --porcelain', mergeDir, workspaceRoot);
+    if (status.trim().length > 0) {
+      await execGitSafe('add -A', mergeDir, workspaceRoot);
+      await execGitSafe('commit --amend --no-edit', mergeDir, workspaceRoot);
+      const { stdout: amendedHash } = await execGitSafe('rev-parse HEAD', mergeDir, workspaceRoot);
+      commitHash = amendedHash.trim();
+    }
+
     // 6. Push to remote (skip when local-only or push disabled)
     if (autoPush && !localOnly) {
       try {
@@ -333,7 +379,7 @@ export async function mergeBranch(options: MergeBranchOptions): Promise<MergeBra
       }
     }
 
-    mergeResult = { success: true, commitHash, hasConflict: false };
+    mergeResult = { success: true, commitHash, hasConflict: false, hookResults };
   } catch (error) {
     const execError = error as { stdout?: string; stderr?: string; message?: string };
     const output = (execError.stdout ?? '') + (execError.stderr ?? '') + (execError.message ?? '');
