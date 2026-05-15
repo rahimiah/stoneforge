@@ -164,6 +164,12 @@ async function mergeHandler(
                 const isBare = lines.some(l => l === 'bare');
                 const branchLine = lines.find(l => l.startsWith('branch '));
                 if (!isBare && branchLine) {
+                  // Stop Docker containers before removing worktree
+                  try {
+                    await execAsync('docker compose down --remove-orphans', { cwd: wtPath });
+                  } catch {
+                    // Non-fatal: docker may not be running or no compose file
+                  }
                   await execAsync(`git worktree remove --force "${wtPath}"`, {
                     cwd: workspaceRoot,
                   });

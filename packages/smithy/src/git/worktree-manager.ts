@@ -641,6 +641,9 @@ export class WorktreeManagerImpl implements WorktreeManager {
     this.worktreeStates.set(relativePath, 'cleaning');
 
     try {
+      // Stop Docker containers if docker-compose.yml exists in the worktree
+      await this.stopDockerContainers(fullPath);
+
       // Remove the worktree
       const removeArgs = ['worktree', 'remove'];
       if (options?.force) {
@@ -959,6 +962,26 @@ export class WorktreeManagerImpl implements WorktreeManager {
           details
         );
       }
+    }
+  }
+
+  /**
+   * Stops Docker Compose containers in a worktree directory if a compose file exists.
+   * Prevents orphaned containers when worktrees are removed.
+   */
+  private async stopDockerContainers(worktreePath: string): Promise<void> {
+    const composeFiles = ['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml'];
+    const hasCompose = composeFiles.some((f) => fs.existsSync(path.join(worktreePath, f)));
+    if (!hasCompose) return;
+
+    try {
+      await execFileAsync('docker', ['compose', 'down', '--remove-orphans'], {
+        cwd: worktreePath,
+        encoding: 'utf8',
+        timeout: 30_000,
+      });
+    } catch {
+      // Non-fatal: docker may not be running or compose project already stopped
     }
   }
 
