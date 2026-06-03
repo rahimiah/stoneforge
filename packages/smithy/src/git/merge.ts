@@ -435,6 +435,28 @@ export async function mergeBranch(options: MergeBranchOptions): Promise<MergeBra
     } else if (autoPush) {
       await syncLocalBranch(workspaceRoot, targetBranch);
     }
+
+    // 9. Post-merge verification: confirm the merge commit actually reached
+    // the target branch. syncLocalBranchFromCommit can fail silently (line 534).
+    if (localOnly && mergeResult.commitHash) {
+      try {
+        const { stdout: targetHead } = await execAsync(
+          `git rev-parse ${targetBranch}`,
+          { cwd: workspaceRoot, encoding: 'utf8' }
+        );
+
+        // Check if merge commit is an ancestor of target branch HEAD
+        await execAsync(
+          `git merge-base --is-ancestor ${mergeResult.commitHash} ${targetHead.trim()}`,
+          { cwd: workspaceRoot, encoding: 'utf8' }
+        );
+        // Exit code 0 = commit IS an ancestor = merge landed
+      } catch {
+        // Exit code 1 = commit is NOT an ancestor = merge didn't land
+        mergeResult.success = false;
+        mergeResult.error = `Post-merge verification failed: commit ${mergeResult.commitHash.substring(0, 8)} did not reach target branch ${targetBranch}`;
+      }
+    }
   }
 
   return mergeResult;

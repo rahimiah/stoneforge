@@ -666,6 +666,73 @@ describe('mergeBranch (local-only, no remote)', () => {
       rmrf(repoDir);
     }
   });
+
+  test('post-merge verification passes on a valid local merge with syncLocal', async () => {
+    const repoDir = await createTestRepo();
+    try {
+      // Create a feature branch with changes
+      await execAsync('git checkout -b feature/verify-pass', { cwd: repoDir });
+      fs.writeFileSync(path.join(repoDir, 'verify.ts'), 'export const v = 1;\n');
+      await execAsync('git add . && git commit -m "Verify pass"', { cwd: repoDir });
+      await execAsync('git checkout main', { cwd: repoDir });
+
+      const result = await mergeBranch({
+        workspaceRoot: repoDir,
+        sourceBranch: 'feature/verify-pass',
+        targetBranch: 'main',
+        commitMessage: 'Verified merge',
+        syncLocal: true,
+      });
+
+      // Verification should pass — commit reached target branch
+      expect(result.success).toBe(true);
+      expect(result.error).toBeUndefined();
+      expect(result.commitHash).toBeDefined();
+
+      // Double-check: main contains the merge commit
+      const { stdout: mainHash } = await execAsync('git rev-parse main', { cwd: repoDir });
+      expect(mainHash.trim()).toBe(result.commitHash);
+    } finally {
+      rmrf(repoDir);
+    }
+  });
+
+  test('post-merge verification fails when target branch does not advance', async () => {
+    const repoDir = await createTestRepo();
+    const refsHeadsDir = path.join(repoDir, '.git', 'refs', 'heads');
+    try {
+      // Create a feature branch with changes
+      await execAsync('git checkout -b feature/verify-fail', { cwd: repoDir });
+      fs.writeFileSync(path.join(repoDir, 'verify-fail.ts'), 'export const vf = 1;\n');
+      await execAsync('git add . && git commit -m "Verify fail"', { cwd: repoDir });
+      // Stay on feature branch so syncLocalBranchFromCommit uses `git branch -f`
+      // (the "not on target branch" path).
+
+      // Make refs/heads read-only so `git branch -f main <hash>` fails with
+      // "Unable to create .lock: Permission denied" — this simulates the silent
+      // failure that syncLocalBranchFromCommit catches at line 534.
+      fs.chmodSync(refsHeadsDir, 0o555);
+
+      const result = await mergeBranch({
+        workspaceRoot: repoDir,
+        sourceBranch: 'feature/verify-fail',
+        targetBranch: 'main',
+        commitMessage: 'Merge that should fail verification',
+        syncLocal: true,
+      });
+
+      // Restore permissions before assertions so cleanup works on failure
+      fs.chmodSync(refsHeadsDir, 0o755);
+
+      // The merge commit was created in a temp worktree but failed to land on main
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Post-merge verification failed');
+      expect(result.error).toContain('did not reach target branch main');
+    } finally {
+      try { fs.chmodSync(refsHeadsDir, 0o755); } catch { /* ignore */ }
+      rmrf(repoDir);
+    }
+  });
 });
 
 // ============================================================================
