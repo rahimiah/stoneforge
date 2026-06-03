@@ -2447,6 +2447,24 @@ export class QuarryAPIImpl implements QuarryAPI {
       ).map((r) => r.element_id)
     );
 
+    // Defense-in-depth: also check dependencies table directly.
+    // A task is blocked if it has a 'blocks' dependency where the
+    // blocker is NOT yet closed. We only check 'blocks' here because
+    // 'awaits' (gate) dependencies have complex satisfaction logic
+    // (timers, approvals) that is already handled by the blocked_cache.
+    const depBlockedIds = this.backend.query<{ blocked_id: string }>(
+      `SELECT DISTINCT d.blocked_id
+       FROM dependencies d
+       JOIN elements e ON d.blocker_id = e.id
+       WHERE d.type = 'blocks'
+         AND e.deleted_at IS NULL
+         AND JSON_EXTRACT(e.data, '$.status') != 'closed'`
+    ).map((r) => r.blocked_id);
+
+    for (const id of depBlockedIds) {
+      blockedIds.add(id);
+    }
+
     // Filter out tasks whose parent plan is in DRAFT status
     // Uses a single SQL join to find task IDs that are children of draft plans
     const draftPlanTaskIds = new Set(

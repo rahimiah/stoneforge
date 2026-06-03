@@ -1838,4 +1838,56 @@ describe('Ready/Blocked Work Query Integration', () => {
       expect(readyTasks.map((t) => t.id)).toContain(standaloneTask.id);
     });
   });
+
+  // ==========================================================================
+  // Defense-in-Depth: Direct Dependency Table Check
+  // ==========================================================================
+
+  describe('Defense-in-Depth: Direct Dependency Table Check', () => {
+    it('should exclude task blocked by open dependency even if blocked_cache is stale', async () => {
+      const blocker = await createTestTask({ title: 'Blocker Task' });
+      const blocked = await createTestTask({ title: 'Blocked Task' });
+
+      await api.create(toCreateInput(blocker));
+      await api.create(toCreateInput(blocked));
+
+      // Add blocking dependency: blocker blocks blocked
+      await api.addDependency({
+        blockedId: blocked.id,
+        blockerId: blocker.id,
+        type: DependencyType.BLOCKS,
+      });
+
+      // Verify ready() excludes the blocked task
+      const readyTasks = await api.ready();
+      expect(readyTasks.map((t) => t.id)).toContain(blocker.id);
+      expect(readyTasks.map((t) => t.id)).not.toContain(blocked.id);
+    });
+
+    it('should include task after its blocker is closed', async () => {
+      const blocker = await createTestTask({ title: 'Blocker Task' });
+      const blocked = await createTestTask({ title: 'Blocked Task' });
+
+      await api.create(toCreateInput(blocker));
+      await api.create(toCreateInput(blocked));
+
+      // Add blocking dependency: blocker blocks blocked
+      await api.addDependency({
+        blockedId: blocked.id,
+        blockerId: blocker.id,
+        type: DependencyType.BLOCKS,
+      });
+
+      // Verify initially excluded
+      let readyTasks = await api.ready();
+      expect(readyTasks.map((t) => t.id)).not.toContain(blocked.id);
+
+      // Close the blocker
+      await api.update<Task>(blocker.id, { status: TaskStatus.CLOSED } as Partial<Task>);
+
+      // Now the blocked task should appear in ready()
+      readyTasks = await api.ready();
+      expect(readyTasks.map((t) => t.id)).toContain(blocked.id);
+    });
+  });
 });
