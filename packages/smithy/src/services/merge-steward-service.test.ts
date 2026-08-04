@@ -24,6 +24,7 @@ import type { PostMergeRunner } from './post-merge-runner.js';
 import {
   MergeStewardServiceImpl,
   MergeStatusConflictError,
+  isTerminalMergeFailure,
   createMergeStewardService,
   type MergeStewardService,
   type MergeStewardConfig,
@@ -2221,5 +2222,183 @@ describe('MergeStewardService', () => {
       expect(error.actualStatus).toBeUndefined();
       expect(error.message).toContain('undefined');
     });
+  });
+});
+
+// ============================================================================
+// Bounded Retry of Failed Merges
+// ============================================================================
+
+describe('MergeStewardService — bounded retry of failed merges', () => {
+  let api: QuarryAPI;
+  let taskAssignment: TaskAssignmentService;
+  let dispatchService: DispatchService;
+  let agentRegistry: AgentRegistry;
+  let worktreeManager: WorktreeManager;
+  let service: MergeStewardService;
+
+  const MAX_ATTEMPTS = 3;
+  const BACKOFF_MS = 5 * 60 * 1000;
+
+  /** Build a REVIEW task parked/failing with the given attempt state. */
+  function failedTask(opts: {
+    attempts?: number;
+    minutesSinceAttempt?: number;
+    mergeStatus?: string;
+    failureReason?: string;
+  }): Task {
+    const { attempts, minutesSinceAttempt, mergeStatus = 'failed', failureReason } = opts;
+    const lastMergeAttemptAt =
+      minutesSinceAttempt === undefined
+        ? undefined
+        : new Date(Date.now() - minutesSinceAttempt * 60 * 1000).toISOString();
+
+    return createMockTask({
+      status: TaskStatus.REVIEW,
+      metadata: {
+        description: 'A test task',
+        orchestrator: {
+          branch: 'agent/worker-alice/task-001',
+          mergeStatus,
+          ...(attempts === undefined ? {} : { mergeAttemptCount: attempts }),
+          ...(lastMergeAttemptAt ? { lastMergeAttemptAt } : {}),
+          ...(failureReason ? { mergeFailureReason: failureReason } : {}),
+        },
+      },
+    } as Partial<Task>);
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    api = createMockApi();
+    taskAssignment = createMockTaskAssignmentService();
+    dispatchService = createMockDispatchService();
+    agentRegistry = createMockAgentRegistry();
+    worktreeManager = createMockWorktreeManager();
+
+    service = createMergeStewardService(
+      api,
+      taskAssignment,
+      dispatchService,
+      agentRegistry,
+      { ...createDefaultConfig(), maxMergeAttempts: MAX_ATTEMPTS, mergeRetryBackoffMs: BACKOFF_MS },
+      worktreeManager
+    );
+  });
+
+  afterEach(() => {
+    vi.resetAllMocks();
+  });
+
+  // --- AC1/AC2: retry eligibility is gated by attempts AND backoff -----------
+
+  it('retries a failed task that is under the ceiling and past its backoff', async () => {
+    const task = failedTask({ attempts: 1, minutesSinceAttempt: 30 });
+    (taskAssignment.getTasksAwaitingMerge as ReturnType<typeof vi.fn>).mockResolvedValue([
+      createMockTaskAssignment(task),
+    ]);
+
+    const eligible = await service.getTasksAwaitingMerge();
+
+    expect(eligible).toHaveLength(1);
+    expect(eligible[0]?.taskId).toBe(task.id);
+  });
+
+  it('does NOT retry a failed task still inside its backoff window', async () => {
+    // attempts=1 -> required wait is 1 * 5min; only 1 minute has passed.
+    const task = failedTask({ attempts: 1, minutesSinceAttempt: 1 });
+    (taskAssignment.getTasksAwaitingMerge as ReturnType<typeof vi.fn>).mockResolvedValue([
+      createMockTaskAssignment(task),
+    ]);
+
+    expect(await service.getTasksAwaitingMerge()).toHaveLength(0);
+  });
+
+  it('grows the backoff with each attempt', async () => {
+    // attempts=2 -> required wait is 2 * 5min = 10min. 7 minutes is not enough.
+    const tooSoon = failedTask({ attempts: 2, minutesSinceAttempt: 7 });
+    (taskAssignment.getTasksAwaitingMerge as ReturnType<typeof vi.fn>).mockResolvedValue([
+      createMockTaskAssignment(tooSoon),
+    ]);
+    expect(await service.getTasksAwaitingMerge()).toHaveLength(0);
+
+    const longEnough = failedTask({ attempts: 2, minutesSinceAttempt: 12 });
+    (taskAssignment.getTasksAwaitingMerge as ReturnType<typeof vi.fn>).mockResolvedValue([
+      createMockTaskAssignment(longEnough),
+    ]);
+    expect(await service.getTasksAwaitingMerge()).toHaveLength(1);
+  });
+
+  // --- AC3: the ceiling is absolute ----------------------------------------
+
+  it('never retries a task that has exhausted its attempts, however old', async () => {
+    const task = failedTask({ attempts: MAX_ATTEMPTS, minutesSinceAttempt: 60 * 24 * 7 });
+    (taskAssignment.getTasksAwaitingMerge as ReturnType<typeof vi.fn>).mockResolvedValue([
+      createMockTaskAssignment(task),
+    ]);
+
+    expect(await service.getTasksAwaitingMerge()).toHaveLength(0);
+  });
+
+  it('retries a failed task with no recorded attempt state rather than stranding it', async () => {
+    const task = failedTask({});
+    (taskAssignment.getTasksAwaitingMerge as ReturnType<typeof vi.fn>).mockResolvedValue([
+      createMockTaskAssignment(task),
+    ]);
+
+    expect(await service.getTasksAwaitingMerge()).toHaveLength(1);
+  });
+
+  // --- AC5: other failure states are untouched ------------------------------
+
+  it('leaves pending/testing/ci_pending tasks eligible regardless of attempt state', async () => {
+    const assignments = ['pending', 'testing', 'ci_pending'].map((mergeStatus) =>
+      createMockTaskAssignment(
+        failedTask({ mergeStatus, attempts: 99, minutesSinceAttempt: 0 })
+      )
+    );
+    (taskAssignment.getTasksAwaitingMerge as ReturnType<typeof vi.fn>).mockResolvedValue(assignments);
+
+    expect(await service.getTasksAwaitingMerge()).toHaveLength(3);
+  });
+
+  // --- AC6/AC8: counter persistence and terminal classification -------------
+
+  it('increments the persisted attempt count on each failure', async () => {
+    const task = failedTask({ attempts: 1, minutesSinceAttempt: 30 });
+    (api.get as ReturnType<typeof vi.fn>).mockResolvedValue(task);
+    (api.update as ReturnType<typeof vi.fn>).mockImplementation((_id, updates) => updates);
+
+    await service.updateMergeStatus(task.id, 'failed', { failureReason: 'index.lock exists' });
+
+    const [, updates] = (api.update as ReturnType<typeof vi.fn>).mock.calls[0];
+    const meta = (updates.metadata as Record<string, any>).orchestrator;
+    expect(meta.mergeAttemptCount).toBe(2);
+    expect(meta.lastMergeAttemptAt).toBeTruthy();
+  });
+
+  it('parks a terminal failure on the first attempt without spending the retry budget', async () => {
+    const task = failedTask({ mergeStatus: 'testing' });
+    (api.get as ReturnType<typeof vi.fn>).mockResolvedValue(task);
+    (api.update as ReturnType<typeof vi.fn>).mockImplementation((_id, updates) => updates);
+
+    await service.updateMergeStatus(task.id, 'failed', {
+      failureReason: 'Task has no branch associated',
+    });
+
+    const [, updates] = (api.update as ReturnType<typeof vi.fn>).mock.calls[0];
+    const meta = (updates.metadata as Record<string, any>).orchestrator;
+    expect(meta.mergeAttemptCount).toBe(MAX_ATTEMPTS);
+  });
+
+  it('classifies transient failures as retryable and structural ones as terminal', () => {
+    expect(isTerminalMergeFailure('fatal: unable to access remote: timeout')).toBe(false);
+    expect(isTerminalMergeFailure('Another git process seems to be running')).toBe(false);
+    expect(isTerminalMergeFailure(undefined)).toBe(false);
+
+    expect(isTerminalMergeFailure('Task has no branch associated')).toBe(true);
+    expect(
+      isTerminalMergeFailure('merge.provider is github-pr but no GitHub merge provider is configured')
+    ).toBe(true);
   });
 });

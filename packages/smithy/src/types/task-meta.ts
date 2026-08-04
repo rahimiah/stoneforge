@@ -60,6 +60,15 @@ export interface OrchestratorTaskMeta {
   /** If merge failed, the reason */
   readonly mergeFailureReason?: string;
 
+  /** Number of merge attempts that have ended in `mergeStatus: 'failed'`.
+   *  Gates bounded retry: once this reaches the steward's maxMergeAttempts the
+   *  task is parked and reported rather than retried again. */
+  readonly mergeAttemptCount?: number;
+
+  /** When the most recent failed merge attempt was recorded. Used with the
+   *  steward's retry backoff so a failing task is not reprocessed immediately. */
+  readonly lastMergeAttemptAt?: Timestamp;
+
   /** Number of times tests have been run on this branch */
   readonly testRunCount?: number;
 
@@ -74,6 +83,12 @@ export interface OrchestratorTaskMeta {
 
   /** Number of times the steward orphan recovery has re-dispatched a steward for this task */
   readonly stewardRecoveryCount?: number;
+
+  /** When steward recovery exhaustion was escalated to a director */
+  readonly stewardRecoveryEscalatedAt?: Timestamp;
+
+  /** Direct message ID for the steward recovery exhaustion escalation */
+  readonly stewardRecoveryEscalationMessageId?: ElementId;
 
   /**
    * Number of consecutive times the orphan recovery loop has resumed this task
@@ -351,6 +366,8 @@ export function isOrchestratorTaskMeta(value: unknown): value is OrchestratorTas
   if (obj.sessionId !== undefined && typeof obj.sessionId !== 'string') return false;
   if (obj.assignedAgent !== undefined && typeof obj.assignedAgent !== 'string') return false;
   if (obj.mergeStatus !== undefined && !isMergeStatus(obj.mergeStatus)) return false;
+  if (obj.mergeAttemptCount !== undefined && typeof obj.mergeAttemptCount !== 'number') return false;
+  if (obj.lastMergeAttemptAt !== undefined && typeof obj.lastMergeAttemptAt !== 'string') return false;
   if (obj.lastTestResult !== undefined && !isTestResult(obj.lastTestResult)) return false;
 
   return true;

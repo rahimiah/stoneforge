@@ -117,6 +117,12 @@ export interface MergeStewardConfig {
   readonly requiredChecks?: readonly string[];
   /** Post-merge hook runner (defaults to config-driven runner) */
   readonly postMergeRunner?: PostMergeRunner;
+  /** Maximum number of failed merge attempts before a task is parked (defaults to 3).
+   *  Set to 0 to disable retry of failed merges entirely. */
+  readonly maxMergeAttempts?: number;
+  /** Base backoff between retries of a failed merge, in ms (defaults to 5 minutes).
+   *  The wait grows with each attempt: attempt N waits base * N. */
+  readonly mergeRetryBackoffMs?: number;
 }
 
 /**
@@ -369,7 +375,34 @@ const DEFAULT_CONFIG = {
   ciTimeoutMinutes: 30,
   requiredChecks: [] as readonly string[],
   postMergeRunner: undefined as PostMergeRunner | undefined,
+  maxMergeAttempts: 3,
+  mergeRetryBackoffMs: 5 * 60 * 1000, // 5 minutes
 } as const;
+
+/**
+ * Failure reasons that can never succeed on retry. These park the task on the
+ * first failure instead of consuming the retry budget.
+ */
+const TERMINAL_MERGE_FAILURE_PATTERNS: readonly RegExp[] = [
+  /no branch associated/i,
+  /task has no branch/i,
+  /no GitHub merge provider is configured/i,
+  /no commits to merge/i,
+  /branch has no commits/i,
+];
+
+/**
+ * Decides whether a `mergeStatus: 'failed'` reason is worth retrying.
+ *
+ * Transient git and infrastructure failures (a concurrent merge advancing the
+ * target branch, index locks, network errors) all surface through the generic
+ * failure path, so the default is retryable; only reasons that are structurally
+ * unfixable by re-running the same merge are terminal.
+ */
+export function isTerminalMergeFailure(reason: string | undefined): boolean {
+  if (!reason) return false;
+  return TERMINAL_MERGE_FAILURE_PATTERNS.some((pattern) => pattern.test(reason));
+}
 
 /**
  * Implementation of the Merge Steward Service.
@@ -419,9 +452,43 @@ export class MergeStewardServiceImpl implements MergeStewardService {
   // ----------------------------------------
 
   async getTasksAwaitingMerge(): Promise<TaskAssignment[]> {
-    // Query for tasks in REVIEW status with pending/testing merge status
-    // TaskAssignmentService.getTasksAwaitingMerge() now handles this correctly
-    return this.taskAssignment.getTasksAwaitingMerge();
+    // The assignment query includes 'failed' so transient merge failures can be
+    // retried. Gate them here: a failed task is only reprocessed while it is
+    // under the attempt ceiling AND past its backoff window. Without this gate
+    // a permanently-failing task would be reprocessed on every daemon tick.
+    const tasks = await this.taskAssignment.getTasksAwaitingMerge();
+    return tasks.filter((assignment) => this.isEligibleForMerge(assignment));
+  }
+
+  /**
+   * Whether a task returned by the assignment query should actually be processed.
+   *
+   * Non-'failed' states are always eligible (unchanged behavior). A 'failed' task
+   * is eligible only while under the attempt ceiling and past its backoff.
+   */
+  private isEligibleForMerge(assignment: TaskAssignment, now: number = Date.now()): boolean {
+    const meta = assignment.orchestratorMeta;
+    if (meta?.mergeStatus !== 'failed') {
+      return true;
+    }
+
+    const attempts = meta.mergeAttemptCount ?? 0;
+    if (attempts >= this.config.maxMergeAttempts) {
+      return false;
+    }
+
+    const lastAttemptAt = meta.lastMergeAttemptAt
+      ? new Date(meta.lastMergeAttemptAt).getTime()
+      : undefined;
+    if (lastAttemptAt === undefined || Number.isNaN(lastAttemptAt)) {
+      // No usable timestamp: allow the retry rather than stranding the task.
+      return true;
+    }
+
+    // Backoff grows with each attempt so a persistently failing merge slows down
+    // instead of hammering the remote once per tick.
+    const requiredWaitMs = this.config.mergeRetryBackoffMs * Math.max(attempts, 1);
+    return now - lastAttemptAt >= requiredWaitMs;
   }
 
   // ----------------------------------------
@@ -1257,6 +1324,31 @@ export class MergeStewardServiceImpl implements MergeStewardService {
 
     if (details?.failureReason) {
       (updates as { mergeFailureReason: string }).mergeFailureReason = details.failureReason;
+    }
+
+    // Track failed attempts so retry can be bounded. A terminal reason (one that
+    // cannot succeed on retry) jumps straight to the ceiling so the task parks
+    // immediately instead of burning the whole retry budget.
+    if (status === 'failed') {
+      const existingMeta = getOrchestratorTaskMeta(
+        task.metadata as Record<string, unknown>
+      );
+      const priorAttempts = existingMeta?.mergeAttemptCount ?? 0;
+      const attempts = isTerminalMergeFailure(details?.failureReason)
+        ? this.config.maxMergeAttempts
+        : priorAttempts + 1;
+
+      (updates as { mergeAttemptCount: number }).mergeAttemptCount = attempts;
+      (updates as { lastMergeAttemptAt: Timestamp }).lastMergeAttemptAt = createTimestamp();
+
+      if (attempts >= this.config.maxMergeAttempts) {
+        const reason = details?.failureReason ?? 'unknown';
+        const message =
+          `Task ${taskId} parked after ${attempts} failed merge attempt(s): ${reason}. ` +
+          'It will not be retried automatically and needs a human decision.';
+        logger.error(message);
+        this.operationLog?.write('error', 'merge', message, { taskId });
+      }
     }
 
     if (details?.testResult) {

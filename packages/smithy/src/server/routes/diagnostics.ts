@@ -35,10 +35,20 @@ export interface MergeQueueDiagnostic {
   awaitingMergeCount: number;
   stuckInTestingCount: number;
   stuckInMergingCount: number;
+  /** Tasks whose merge failed and exhausted the retry budget. These are parked:
+   *  the steward will not retry them, so they need a human decision. */
+  parkedMergeCount: number;
   stuckTasks: Array<{
     taskId: string;
     title: string;
     mergeStatus: string;
+    updatedAt: string;
+  }>;
+  parkedTasks: Array<{
+    taskId: string;
+    title: string;
+    attempts: number;
+    failureReason: string;
     updatedAt: string;
   }>;
 }
@@ -84,6 +94,10 @@ export interface DiagnosticsResponse {
  * Default: 10 minutes.
  */
 const STUCK_MERGE_THRESHOLD_MS = 10 * 60 * 1000;
+
+/** Failed-merge attempts at or above this count mean the steward has stopped
+ *  retrying. Mirrors the steward's default maxMergeAttempts. */
+const PARKED_MERGE_ATTEMPT_THRESHOLD = 3;
 
 // ============================================================================
 // Route Factory
@@ -202,7 +216,9 @@ async function collectMergeQueue(services: Services): Promise<MergeQueueDiagnost
   let awaitingMergeCount = 0;
   let stuckInTestingCount = 0;
   let stuckInMergingCount = 0;
+  let parkedMergeCount = 0;
   const stuckTasks: MergeQueueDiagnostic['stuckTasks'] = [];
+  const parkedTasks: MergeQueueDiagnostic['parkedTasks'] = [];
 
   const now = Date.now();
 
@@ -240,13 +256,31 @@ async function collectMergeQueue(services: Services): Promise<MergeQueueDiagnost
         updatedAt: task.updatedAt || '',
       });
     }
+
+    // Parked: the merge failed and the steward has exhausted its retry budget,
+    // so nothing will pick this task up again without a human.
+    if (
+      mergeStatus === 'failed' &&
+      (meta?.mergeAttemptCount ?? 0) >= PARKED_MERGE_ATTEMPT_THRESHOLD
+    ) {
+      parkedMergeCount++;
+      parkedTasks.push({
+        taskId: task.id,
+        title: task.title || task.id,
+        attempts: meta?.mergeAttemptCount ?? 0,
+        failureReason: meta?.mergeFailureReason || 'unknown',
+        updatedAt: task.updatedAt || '',
+      });
+    }
   }
 
   return {
     awaitingMergeCount,
     stuckInTestingCount,
     stuckInMergingCount,
+    parkedMergeCount,
     stuckTasks,
+    parkedTasks,
   };
 }
 

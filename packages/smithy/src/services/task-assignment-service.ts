@@ -884,9 +884,17 @@ export class TaskAssignmentServiceImpl implements TaskAssignmentService {
   }
 
   async getTasksAwaitingMerge(): Promise<TaskAssignment[]> {
+    // 'failed' is included so transient merge failures (races with a concurrent
+    // merge, git locks, network blips) can be retried instead of parking the task
+    // forever. Retry is NOT unconditional: MergeStewardService applies the attempt
+    // ceiling and backoff gate before reprocessing any 'failed' task.
+    //
+    // 'conflict' and 'test_failed' are deliberately excluded — a conflict already
+    // gets a fix task, and failing tests mean the code is wrong, so re-running the
+    // merge cannot help.
     return this.listAssignments({
       taskStatus: TaskStatus.REVIEW,
-      mergeStatus: ['pending', 'testing', 'ci_pending'],
+      mergeStatus: ['pending', 'testing', 'ci_pending', 'failed'],
     });
   }
 
