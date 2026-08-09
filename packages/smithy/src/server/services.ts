@@ -4,12 +4,15 @@
  * Creates and exports all orchestrator services.
  */
 
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { createStorage, initializeSchema } from '@stoneforge/storage';
 import type { StorageBackend } from '@stoneforge/storage';
 import { createQuarryAPI, createInboxService, createSyncService, createAutoExportService, loadConfig } from '@stoneforge/quarry';
 import type { QuarryAPI, InboxService, SyncService, AutoExportService } from '@stoneforge/quarry';
 import { createSessionMessageService, type SessionMessageService } from './services/session-messages.js';
-import type { EntityId, ElementId, Playbook } from '@stoneforge/core';
+import { TaskStatus, type EntityId, type ElementId, type Playbook, type Task } from '@stoneforge/core';
 import {
   createOrchestratorAPI,
   createAgentRegistry,
@@ -53,6 +56,8 @@ import {
   type MetricOutcome,
   type OnSessionStartedCallback,
   type ExternalSyncDaemon,
+  type SpawnedSessionEvent,
+  getAgentMetadata,
   trackListeners,
 } from '../index.js';
 import { createSyncEngine, createDefaultProviderRegistry } from '@stoneforge/quarry';
@@ -96,6 +101,217 @@ export interface Services {
   settingsService: SettingsService;
   metricsService: MetricsService;
   storageBackend: StorageBackend;
+}
+
+export interface MetricTokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export interface CodexSessionMetrics extends MetricTokenUsage {
+  model?: string;
+  modelProvider?: string;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null ? value as Record<string, unknown> : undefined;
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function asNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function extractTokenUsage(value: unknown): MetricTokenUsage | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+
+  const directInputTokens = asNumber(record.input_tokens ?? record.inputTokens);
+  const directOutputTokens = asNumber(record.output_tokens ?? record.outputTokens);
+  if (directInputTokens !== undefined || directOutputTokens !== undefined) {
+    return {
+      inputTokens: directInputTokens ?? 0,
+      outputTokens: directOutputTokens ?? 0,
+    };
+  }
+
+  return (
+    extractTokenUsage(record.last) ??
+    extractTokenUsage(record.last_token_usage) ??
+    extractTokenUsage(record.total) ??
+    extractTokenUsage(record.total_token_usage) ??
+    extractTokenUsage(record.info) ??
+    extractTokenUsage(record.usage) ??
+    extractTokenUsage(record.tokenUsage) ??
+    extractTokenUsage(asRecord(record.params)?.tokenUsage) ??
+    extractTokenUsage(asRecord(record.payload)?.info)
+  );
+}
+
+export function accumulateMetricTokenUsage(
+  current: MetricTokenUsage,
+  raw: unknown
+): MetricTokenUsage {
+  const usage = extractTokenUsage(raw);
+  if (!usage) {
+    return current;
+  }
+
+  return {
+    inputTokens: current.inputTokens + usage.inputTokens,
+    outputTokens: current.outputTokens + usage.outputTokens,
+  };
+}
+
+export function extractCodexSessionMetrics(content: string): CodexSessionMetrics | undefined {
+  let model: string | undefined;
+  let modelProvider: string | undefined;
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let sawMetrics = false;
+
+  for (const line of content.split('\n')) {
+    if (!line.trim()) continue;
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      continue;
+    }
+
+    const entry = asRecord(parsed);
+    if (!entry) continue;
+
+    if (entry.type === 'session_meta') {
+      const payload = asRecord(entry.payload);
+      modelProvider = asString(payload?.model_provider) ?? modelProvider;
+      continue;
+    }
+
+    if (entry.type === 'turn_context') {
+      const payload = asRecord(entry.payload);
+      model = asString(payload?.model) ?? model;
+      continue;
+    }
+
+    if (entry.type !== 'event_msg') {
+      continue;
+    }
+
+    const payload = asRecord(entry.payload);
+    if (payload?.type !== 'token_count') {
+      continue;
+    }
+
+    const usage = extractTokenUsage(payload);
+    if (!usage) {
+      continue;
+    }
+
+    inputTokens = usage.inputTokens;
+    outputTokens = usage.outputTokens;
+    sawMetrics = true;
+  }
+
+  if (!model && !modelProvider && !sawMetrics) {
+    return undefined;
+  }
+
+  return {
+    model,
+    modelProvider,
+    inputTokens,
+    outputTokens,
+  };
+}
+
+function findCodexSessionFile(
+  providerSessionId: string,
+  sessionsRoot = join(homedir(), '.codex', 'sessions')
+): string | undefined {
+  if (!existsSync(sessionsRoot)) {
+    return undefined;
+  }
+
+  const pending = [sessionsRoot];
+  while (pending.length > 0) {
+    const currentDir = pending.pop();
+    if (!currentDir) continue;
+
+    let entries: Array<{ name: string; isDirectory(): boolean; isFile(): boolean }>;
+    try {
+      entries = readdirSync(currentDir, {
+        withFileTypes: true,
+        encoding: 'utf8',
+      }) as Array<{ name: string; isDirectory(): boolean; isFile(): boolean }>;
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const fullPath = join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        pending.push(fullPath);
+        continue;
+      }
+
+      if (entry.isFile() && entry.name.endsWith(`${providerSessionId}.jsonl`)) {
+        return fullPath;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function readCodexSessionMetrics(providerSessionId?: string): CodexSessionMetrics | undefined {
+  if (!providerSessionId) {
+    return undefined;
+  }
+
+  const sessionFile = findCodexSessionFile(providerSessionId);
+  if (!sessionFile) {
+    return undefined;
+  }
+
+  try {
+    return extractCodexSessionMetrics(readFileSync(sessionFile, 'utf8'));
+  } catch {
+    return undefined;
+  }
+}
+
+function isFailedResultEvent(event: SpawnedSessionEvent): boolean {
+  if (typeof event.subtype === 'string' && event.subtype.startsWith('error')) {
+    return true;
+  }
+
+  const raw = asRecord(event.raw);
+  if (!raw) {
+    return false;
+  }
+
+  if (raw.is_error === true) {
+    return true;
+  }
+
+  const rawTurn = asRecord(asRecord(raw.params)?.turn);
+  return rawTurn?.status === 'failed';
+}
+
+export function deriveMetricOutcome(
+  taskStatus: Task['status'] | undefined,
+  sessionOutcome: MetricOutcome
+): MetricOutcome {
+  if (taskStatus === TaskStatus.OPEN || taskStatus === TaskStatus.DEFERRED) {
+    return 'handoff';
+  }
+
+  return sessionOutcome;
 }
 
 export async function initializeServices(options: ServicesOptions = {}): Promise<Services> {
@@ -301,6 +517,13 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
         isError: false,
       });
 
+      // Track metrics state for this session
+      const sessionStartTime = Date.now();
+      let metricsRecorded = false;
+      let sessionOutcome: MetricOutcome = 'completed';
+      let sessionInputTokens = 0;
+      let sessionOutputTokens = 0;
+
       // Listen for rate_limited events from sessions and forward to trackers
       const onRateLimited = (data: { executablePath?: string; resetsAt?: Date; message?: string }) => {
         if (data.executablePath) {
@@ -312,14 +535,12 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
           // Forward to steward executor's tracker
           rateLimitTracker.markLimited(data.executablePath, resetTime);
         }
+        sessionOutcome = 'rate_limited';
       };
 
-      // Track metrics state for this session
-      const sessionStartTime = Date.now();
-      let metricsRecorded = false;
-      let sessionOutcome: MetricOutcome = 'completed';
-      let sessionInputTokens = 0;
-      let sessionOutputTokens = 0;
+      const sessionAgentMetaPromise = agentRegistry.getAgent(agentId)
+        .then(agent => agent ? getAgentMetadata(agent) : undefined)
+        .catch(() => undefined);
       // Capture the task assignment at session start, before dispatch/unassign transitions on exit.
       const sessionTaskIdPromise = taskAssignmentService.getAgentTasks(agentId)
         .then(tasks => tasks.length > 0 ? tasks[0].taskId : undefined)
@@ -331,31 +552,62 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
         metricsRecorded = true;
 
         const durationMs = Date.now() - sessionStartTime;
-        const provider = 'claude-code';
-        const taskId = await sessionTaskIdPromise;
+        const [taskId, agentMeta] = await Promise.all([
+          sessionTaskIdPromise,
+          sessionAgentMetaPromise,
+        ]);
+        const codexSessionMetrics = readCodexSessionMetrics(session.providerSessionId);
+
+        const provider =
+          asString(agentMeta?.provider) ??
+          codexSessionMetrics?.modelProvider ??
+          'unknown';
+        const model =
+          codexSessionMetrics?.model ??
+          asString(agentMeta?.model);
+
+        if (codexSessionMetrics && (codexSessionMetrics.inputTokens > 0 || codexSessionMetrics.outputTokens > 0)) {
+          sessionInputTokens = codexSessionMetrics.inputTokens;
+          sessionOutputTokens = codexSessionMetrics.outputTokens;
+        }
+
+        const task = taskId
+          ? await api.get<Task>(taskId as ElementId).catch(() => undefined)
+          : undefined;
 
         metricsService.record({
           provider,
+          model,
           sessionId: session.id,
           taskId,
           inputTokens: sessionInputTokens,
           outputTokens: sessionOutputTokens,
           durationMs,
-          outcome: sessionOutcome,
+          outcome: deriveMetricOutcome(task?.status, sessionOutcome),
         });
       };
 
       // Auto-terminate sessions when they emit a 'result' event
       // This handles ephemeral worker sessions completing their tasks
-      const onResultEvent = (event: { type: string; raw?: { usage?: { input_tokens?: number; output_tokens?: number } } }) => {
-        if (event.type === 'result') {
-          // Extract token counts from the result event if available
-          const usage = event.raw?.usage;
-          if (usage) {
-            sessionInputTokens = usage.input_tokens ?? 0;
-            sessionOutputTokens = usage.output_tokens ?? 0;
+      const onSessionEvent = (event: SpawnedSessionEvent) => {
+        const totals = accumulateMetricTokenUsage({
+          inputTokens: sessionInputTokens,
+          outputTokens: sessionOutputTokens,
+        }, event.raw);
+        sessionInputTokens = totals.inputTokens;
+        sessionOutputTokens = totals.outputTokens;
+
+        if (event.type === 'error') {
+          if (sessionOutcome !== 'rate_limited') {
+            sessionOutcome = 'failed';
           }
-          sessionOutcome = 'completed';
+          return;
+        }
+
+        if (event.type === 'result') {
+          if (isFailedResultEvent(event) && sessionOutcome !== 'rate_limited') {
+            sessionOutcome = 'failed';
+          }
           void recordSessionMetrics();
 
           logger.debug(`Session ${session.id} emitted result, auto-terminating`);
@@ -374,7 +626,9 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
       const onExit = (code?: number) => {
         // If metrics haven't been recorded yet (no result event), record on exit
         if (!metricsRecorded) {
-          sessionOutcome = (code && code !== 0) ? 'failed' : 'completed';
+          if (code && code !== 0 && sessionOutcome === 'completed') {
+            sessionOutcome = 'failed';
+          }
           void recordSessionMetrics();
         }
         cleanup();
@@ -382,7 +636,7 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
 
       const cleanup = trackListeners(events, {
         'rate_limited': onRateLimited,
-        'event': onResultEvent,
+        'event': onSessionEvent,
         'exit': onExit,
       });
     };
