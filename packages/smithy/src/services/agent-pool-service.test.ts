@@ -890,6 +890,86 @@ describe('AgentPoolService', () => {
   });
 
   // ----------------------------------------
+  // Slot accounting (regression)
+  // ----------------------------------------
+
+  describe('slot accounting does not leak', () => {
+    async function poolWithAgent(poolName: string, poolId: string, agentId: string) {
+      const input = createTestPoolInput({ name: poolName });
+      api.create.mockResolvedValue({
+        id: asElementId(poolId),
+        createdAt: '2024-01-01T00:00:00.000Z',
+        createdBy: input.createdBy,
+      });
+      api.lookupEntityByName.mockResolvedValue(null);
+      api.list.mockResolvedValue([]);
+
+      const pool = await service.createPool(input);
+      // 'ephemeral', NOT 'headless'. WorkerMode is 'ephemeral' | 'persistent';
+      // an invalid mode makes validateAgentMetadata reject the agent, so
+      // onAgentSpawned early-returns and every assertion here passes vacuously.
+      const agent = createTestAgentEntity(agentId, 'worker', 'ephemeral');
+      agentRegistry.getAgent.mockResolvedValue(agent);
+      api.list.mockResolvedValue([createTestPoolEntity(pool.id, pool.config)]);
+      return pool;
+    }
+
+    it('counts an agent once even if spawn fires twice without an end', async () => {
+      const pool = await poolWithAgent('dup-spawn', 'el-dup-pool', 'el-dup-agent');
+
+      await service.onAgentSpawned(asEntityId('el-dup-agent'));
+      await service.onAgentSpawned(asEntityId('el-dup-agent'));
+
+      const status = await service.getPoolStatus(pool.id);
+      expect(status.activeAgentIds).toEqual([asEntityId('el-dup-agent')]);
+      expect(status.activeCount).toBe(1);
+      expect(status.availableSlots).toBe(4);
+    });
+
+    it('releases the slot fully after a duplicate spawn', async () => {
+      // The original defect: a duplicate spawn incremented the counter twice while
+      // the release path filtered every occurrence but decremented only once, so
+      // activeCount stayed permanently above activeAgentIds.length and the pool
+      // eventually reported zero available slots with no live sessions.
+      const pool = await poolWithAgent('leak', 'el-leak-pool', 'el-leak-agent');
+
+      await service.onAgentSpawned(asEntityId('el-leak-agent'));
+      await service.onAgentSpawned(asEntityId('el-leak-agent'));
+      await service.onAgentSessionEnded(asEntityId('el-leak-agent'));
+
+      const status = await service.getPoolStatus(pool.id);
+      expect(status.activeAgentIds).toEqual([]);
+      expect(status.activeCount).toBe(0);
+      expect(status.availableSlots).toBe(5);
+    });
+
+    it('keeps activeCount equal to activeAgentIds.length across many cycles', async () => {
+      const pool = await poolWithAgent('churn', 'el-churn-pool', 'el-churn-agent');
+
+      for (let i = 0; i < 5; i++) {
+        await service.onAgentSpawned(asEntityId('el-churn-agent'));
+        await service.onAgentSpawned(asEntityId('el-churn-agent'));
+        await service.onAgentSessionEnded(asEntityId('el-churn-agent'));
+      }
+
+      const status = await service.getPoolStatus(pool.id);
+      expect(status.activeCount).toBe(status.activeAgentIds.length);
+      expect(status.activeCount).toBe(0);
+      expect(status.availableSlots).toBe(5);
+    });
+
+    it('never reports negative available slots', async () => {
+      const pool = await poolWithAgent('floor', 'el-floor-pool', 'el-floor-agent');
+
+      await service.onAgentSessionEnded(asEntityId('el-floor-agent'));
+
+      const status = await service.getPoolStatus(pool.id);
+      expect(status.availableSlots).toBeGreaterThanOrEqual(0);
+      expect(status.activeCount).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  // ----------------------------------------
   // Status Refresh
   // ----------------------------------------
 

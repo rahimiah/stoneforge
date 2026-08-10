@@ -651,14 +651,26 @@ export class AgentPoolServiceImpl implements AgentPoolService {
       const status = this.statusCache.get(pool.id) ?? await this.getPoolStatus(pool.id);
       const typeKey = this.getAgentTypeKey(agent);
 
+      // Idempotent: a session can start again for an agent already counted as
+      // active (re-spawn, or a missed session-ended event). Without this guard the
+      // id is appended twice AND the count incremented twice, and the release path
+      // can only ever give one of those back — the slot leaks permanently and the
+      // pool eventually reports zero available slots with no live sessions.
+      if (status.activeAgentIds.includes(agentId)) {
+        continue;
+      }
+
+      const activeAgentIds = [...status.activeAgentIds, agentId];
       const updatedStatus: AgentPoolStatus = {
-        activeCount: status.activeCount + 1,
-        availableSlots: pool.config.maxSize - status.activeCount - 1,
+        // Derived from activeAgentIds rather than tracked separately, so the
+        // counter cannot drift away from the list it is supposed to summarise.
+        activeCount: activeAgentIds.length,
+        availableSlots: Math.max(0, pool.config.maxSize - activeAgentIds.length),
         activeByType: {
           ...status.activeByType,
           [typeKey]: (status.activeByType[typeKey] ?? 0) + 1,
         },
-        activeAgentIds: [...status.activeAgentIds, agentId],
+        activeAgentIds,
         lastUpdatedAt: createTimestamp(),
       };
 
@@ -673,11 +685,16 @@ export class AgentPoolServiceImpl implements AgentPoolService {
       // Agent may have been deleted, just remove from all pools
       for (const [poolId, status] of this.statusCache.entries()) {
         if (status.activeAgentIds.includes(agentId)) {
+          const activeAgentIds = status.activeAgentIds.filter((id) => id !== agentId);
+          const pool = await this.getPool(poolId as ElementId);
           const updatedStatus: AgentPoolStatus = {
-            activeCount: Math.max(0, status.activeCount - 1),
-            availableSlots: status.availableSlots + 1,
+            // Derived from activeAgentIds, as in the normal release path.
+            activeCount: activeAgentIds.length,
+            availableSlots: pool
+              ? Math.max(0, pool.config.maxSize - activeAgentIds.length)
+              : status.availableSlots + 1,
             activeByType: status.activeByType, // Can't update type counts without agent info
-            activeAgentIds: status.activeAgentIds.filter((id) => id !== agentId),
+            activeAgentIds,
             lastUpdatedAt: createTimestamp(),
           };
 
@@ -704,14 +721,18 @@ export class AgentPoolServiceImpl implements AgentPoolService {
       const status = this.statusCache.get(pool.id) ?? await this.getPoolStatus(pool.id);
       const typeKey = this.getAgentTypeKey(agent);
 
+      const activeAgentIds = status.activeAgentIds.filter((id) => id !== agentId);
       const updatedStatus: AgentPoolStatus = {
-        activeCount: Math.max(0, status.activeCount - 1),
-        availableSlots: pool.config.maxSize - Math.max(0, status.activeCount - 1),
+        // Derived from activeAgentIds. The previous code decremented a separate
+        // counter by exactly 1 while filter() removed every occurrence of the id,
+        // so any duplicate left the counter permanently above the real list length.
+        activeCount: activeAgentIds.length,
+        availableSlots: Math.max(0, pool.config.maxSize - activeAgentIds.length),
         activeByType: {
           ...status.activeByType,
           [typeKey]: Math.max(0, (status.activeByType[typeKey] ?? 0) - 1),
         },
-        activeAgentIds: status.activeAgentIds.filter((id) => id !== agentId),
+        activeAgentIds,
         lastUpdatedAt: createTimestamp(),
       };
 
