@@ -14,6 +14,38 @@ import { fileURLToPath } from 'node:url';
 const __opencodeFilename = fileURLToPath(import.meta.url);
 const __opencodeDir = dirname(__opencodeFilename);
 
+/**
+ * Directory holding the `sf` CLI binary, resolved from this module's own location
+ * (dist/providers/opencode/) rather than from stoneforgeRoot, which points at the
+ * managed project instead of the sf installation.
+ */
+export const SF_BIN_DIR = resolve(__opencodeDir, '../../bin');
+
+/**
+ * Configure the environment the OpenCode server will be spawned with.
+ *
+ * Mutates `process.env` deliberately. The OpenCode SDK spawns its server with
+ * `env: { ...process.env }` and exposes no per-spawn env option, so this is the
+ * only channel that reaches the child process. Safe to call repeatedly: the PATH
+ * entry is only prepended when absent.
+ *
+ * Without SF_BIN_DIR on PATH, agents cannot run `sf task complete` or
+ * `sf task handoff`, which the worker prompt requires to end a session. They then
+ * stall and get resumed indefinitely.
+ */
+export function applyOpenCodeEnv(stoneforgeRoot?: string): void {
+  process.env.OPENCODE_PERMISSION = JSON.stringify({ '*': 'allow' });
+  process.env.OPENCODE_CLIENT = 'stoneforge';
+  if (stoneforgeRoot) {
+    process.env.STONEFORGE_ROOT = stoneforgeRoot;
+  }
+
+  const currentPath = process.env.PATH ?? '';
+  if (!currentPath.split(':').includes(SF_BIN_DIR)) {
+    process.env.PATH = currentPath ? `${SF_BIN_DIR}:${currentPath}` : SF_BIN_DIR;
+  }
+}
+
 // ============================================================================
 // Internal Types (our interface into the SDK)
 // ============================================================================
@@ -263,24 +295,17 @@ class OpenCodeServerManager {
   private async startServer(config?: ServerManagerConfig): Promise<OpencodeClient> {
     const createOpencode = await this.loadSDK();
 
-    const env: Record<string, string> = {
-      ...(process.env as Record<string, string>),
-      OPENCODE_PERMISSION: JSON.stringify({ '*': 'allow' }),
-      OPENCODE_CLIENT: 'stoneforge',
-    };
-    if (config?.stoneforgeRoot) {
-      env.STONEFORGE_ROOT = config.stoneforgeRoot;
-    }
-    // Prepend the sf CLI binary directory to PATH so agents can run `sf` commands.
-    // Resolve from this module's location (dist/providers/opencode/) rather than
-    // stoneforgeRoot, which points to the managed project, not the sf installation.
-    const sfBinDir = resolve(__opencodeDir, '../../bin');
-    env.PATH = sfBinDir + ':' + (env.PATH ?? '');
+    // These MUST be set on process.env, not passed to createOpencode. The SDK's
+    // ServerOptions type (1.2.6) is { hostname, port, signal, timeout, config } —
+    // it has no `env` field, and server.js spawns `opencode` with
+    // `env: { ...process.env, OPENCODE_CONFIG_CONTENT }`. Anything handed to the
+    // SDK as `env` is silently discarded. Mutating process.env is the only way to
+    // reach the spawned server; there is no per-spawn env hook in this SDK version.
+    applyOpenCodeEnv(config?.stoneforgeRoot);
 
     const result = await createOpencode({
       port: config?.port ?? 0,
       cwd: config?.cwd,
-      env,
     });
 
     // The SDK returns richer types; we extract what we need
