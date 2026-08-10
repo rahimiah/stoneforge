@@ -8,8 +8,10 @@ import {
   CODEX_SESSION_TAIL_BYTES,
   deriveMetricOutcome,
   extractCodexSessionMetrics,
+  extractMessageTokenUsage,
   extractMetricModel,
   findCodexSessionFile,
+  totalMessageTokenUsage,
   readCodexSessionMetrics,
 } from './services.js';
 
@@ -217,5 +219,88 @@ describe('server metrics helpers', () => {
     expect(deriveMetricOutcome(TaskStatus.IN_PROGRESS, 'rate_limited')).toBe('rate_limited');
     expect(deriveMetricOutcome(TaskStatus.OPEN, 'rate_limited')).toBe('rate_limited');
     expect(deriveMetricOutcome(TaskStatus.DEFERRED, 'failed')).toBe('failed');
+  });
+});
+
+describe('OpenCode per-message token usage', () => {
+  // OpenCode reports usage as properties.info.tokens = { input, output, ... } on an
+  // assistant message. extractTokenUsage does not recognise that shape, which is why
+  // OpenCode sessions recorded a correct model but zero tokens.
+  const messageUpdated = (id: string, input: number, output: number) => ({
+    type: 'message.updated',
+    properties: {
+      info: {
+        id,
+        sessionID: 'ses_1',
+        role: 'assistant',
+        cost: 0.01,
+        tokens: { input, output, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+    },
+  });
+
+  test('extracts usage and the owning message id', () => {
+    expect(extractMessageTokenUsage(messageUpdated('msg_1', 120, 45))).toEqual({
+      messageId: 'msg_1',
+      inputTokens: 120,
+      outputTokens: 45,
+    });
+  });
+
+  test('ignores user messages, which carry no tokens', () => {
+    expect(extractMessageTokenUsage({
+      type: 'message.updated',
+      properties: { info: { id: 'msg_u', sessionID: 'ses_1', role: 'user' } },
+    })).toBeUndefined();
+  });
+
+  test('ignores unrelated events', () => {
+    expect(extractMessageTokenUsage({ type: 'session.status' })).toBeUndefined();
+    expect(extractMessageTokenUsage(null)).toBeUndefined();
+    expect(extractMessageTokenUsage({ properties: {} })).toBeUndefined();
+  });
+
+  test('does NOT overcount when a message streams cumulative updates', () => {
+    // The defect this design exists to prevent: message.updated fires repeatedly
+    // for one message with a RUNNING TOTAL. Summing every event would report
+    // 60+180+300 = 540 input tokens for a message that actually used 300.
+    const perMessage = new Map<string, { inputTokens: number; outputTokens: number }>();
+    for (const ev of [
+      messageUpdated('msg_1', 60, 10),
+      messageUpdated('msg_1', 180, 40),
+      messageUpdated('msg_1', 300, 90),
+    ]) {
+      const u = extractMessageTokenUsage(ev)!;
+      perMessage.set(u.messageId, { inputTokens: u.inputTokens, outputTokens: u.outputTokens });
+    }
+
+    expect(totalMessageTokenUsage(perMessage)).toEqual({ inputTokens: 300, outputTokens: 90 });
+  });
+
+  test('sums across distinct messages in a session', () => {
+    const perMessage = new Map<string, { inputTokens: number; outputTokens: number }>();
+    for (const ev of [
+      messageUpdated('msg_1', 100, 20),
+      messageUpdated('msg_1', 150, 30),
+      messageUpdated('msg_2', 200, 70),
+    ]) {
+      const u = extractMessageTokenUsage(ev)!;
+      perMessage.set(u.messageId, { inputTokens: u.inputTokens, outputTokens: u.outputTokens });
+    }
+
+    expect(totalMessageTokenUsage(perMessage)).toEqual({ inputTokens: 350, outputTokens: 100 });
+  });
+
+  test('totals an empty map to zero', () => {
+    expect(totalMessageTokenUsage(new Map())).toEqual({ inputTokens: 0, outputTokens: 0 });
+  });
+
+  test('the additive path still ignores the OpenCode shape, so they cannot double count', () => {
+    // accumulateMetricTokenUsage must not also match message.updated, or a session
+    // would be counted twice.
+    expect(accumulateMetricTokenUsage(
+      { inputTokens: 0, outputTokens: 0 },
+      messageUpdated('msg_1', 120, 45)
+    )).toEqual({ inputTokens: 0, outputTokens: 0 });
   });
 });

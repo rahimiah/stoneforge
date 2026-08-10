@@ -173,6 +173,65 @@ export function accumulateMetricTokenUsage(
   };
 }
 
+/** Token usage attributed to a specific assistant message. */
+export interface MetricMessageTokenUsage extends MetricTokenUsage {
+  messageId: string;
+}
+
+/**
+ * Extract per-message token usage from an OpenCode `message.updated` event.
+ *
+ * OpenCode reports usage as `properties.info.tokens = { input, output, ... }` on
+ * an assistant message — a shape `extractTokenUsage` does not recognise, which is
+ * why OpenCode sessions recorded zero tokens while their model was captured fine.
+ *
+ * Crucially these events are CUMULATIVE PER MESSAGE: `message.updated` fires
+ * repeatedly for the same message id as the reply streams, each time carrying the
+ * running total for that message. Summing every event would multiply the real
+ * usage many times over, so callers must keep the LAST value seen per message id
+ * and add up across distinct ids. That is why this returns the id rather than a
+ * bare total.
+ */
+export function extractMessageTokenUsage(raw: unknown): MetricMessageTokenUsage | undefined {
+  const record = asRecord(raw);
+  if (!record) return undefined;
+
+  const info = asRecord(asRecord(record.properties)?.info) ?? asRecord(record.info);
+  if (!info) return undefined;
+
+  // Only assistant messages carry usage; user messages have no `tokens`.
+  const tokens = asRecord(info.tokens);
+  if (!tokens) return undefined;
+
+  const messageId = asString(info.id);
+  if (!messageId) return undefined;
+
+  const inputTokens = asNumber(tokens.input);
+  const outputTokens = asNumber(tokens.output);
+  if (inputTokens === undefined && outputTokens === undefined) return undefined;
+
+  return {
+    messageId,
+    inputTokens: inputTokens ?? 0,
+    outputTokens: outputTokens ?? 0,
+  };
+}
+
+/**
+ * Total the per-message usage collected during a session.
+ */
+export function totalMessageTokenUsage(
+  perMessage: ReadonlyMap<string, MetricTokenUsage>
+): MetricTokenUsage {
+  let inputTokens = 0;
+  let outputTokens = 0;
+  for (const usage of perMessage.values()) {
+    inputTokens += usage.inputTokens;
+    outputTokens += usage.outputTokens;
+  }
+  return { inputTokens, outputTokens };
+}
+
 export function extractMetricModel(value: unknown): string | undefined {
   const record = asRecord(value);
   if (!record) return undefined;
@@ -622,6 +681,9 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
       let sessionInputTokens = 0;
       let sessionOutputTokens = 0;
       let sessionModel: string | undefined;
+      // Per-assistant-message usage, for providers (OpenCode) that report a
+      // running cumulative total per message rather than a one-shot session total.
+      const sessionMessageTokens = new Map<string, MetricTokenUsage>();
 
       // Listen for rate_limited events from sessions and forward to trackers
       const onRateLimited = (data: { executablePath?: string; resetsAt?: Date; message?: string }) => {
@@ -668,6 +730,12 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
         if (codexSessionMetrics && (codexSessionMetrics.inputTokens > 0 || codexSessionMetrics.outputTokens > 0)) {
           sessionInputTokens = codexSessionMetrics.inputTokens;
           sessionOutputTokens = codexSessionMetrics.outputTokens;
+        } else if (sessionMessageTokens.size > 0) {
+          // Providers reporting cumulative per-message usage (OpenCode): sum the
+          // last value seen for each distinct message.
+          const totals = totalMessageTokenUsage(sessionMessageTokens);
+          sessionInputTokens = totals.inputTokens;
+          sessionOutputTokens = totals.outputTokens;
         }
 
         const task = taskId
@@ -691,12 +759,24 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
       const onSessionEvent = (event: SpawnedSessionEvent) => {
         sessionModel = extractMetricModel(event.raw) ?? sessionModel;
 
-        const totals = accumulateMetricTokenUsage({
-          inputTokens: sessionInputTokens,
-          outputTokens: sessionOutputTokens,
-        }, event.raw);
-        sessionInputTokens = totals.inputTokens;
-        sessionOutputTokens = totals.outputTokens;
+        // Two disjoint token sources. OpenCode reports cumulative usage per
+        // assistant message, so those are keyed by message id and last-write-wins;
+        // Claude and Codex report one-shot totals, which accumulate additively.
+        // A given event matches at most one shape, so there is no double counting.
+        const messageUsage = extractMessageTokenUsage(event.raw);
+        if (messageUsage) {
+          sessionMessageTokens.set(messageUsage.messageId, {
+            inputTokens: messageUsage.inputTokens,
+            outputTokens: messageUsage.outputTokens,
+          });
+        } else {
+          const totals = accumulateMetricTokenUsage({
+            inputTokens: sessionInputTokens,
+            outputTokens: sessionOutputTokens,
+          }, event.raw);
+          sessionInputTokens = totals.inputTokens;
+          sessionOutputTokens = totals.outputTokens;
+        }
 
         if (event.type === 'error') {
           if (sessionOutcome !== 'rate_limited') {
