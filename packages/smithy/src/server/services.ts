@@ -4,7 +4,7 @@
  * Creates and exports all orchestrator services.
  */
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { open, readdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createStorage, initializeSchema } from '@stoneforge/storage';
@@ -112,6 +112,13 @@ export interface CodexSessionMetrics extends MetricTokenUsage {
   model?: string;
   modelProvider?: string;
 }
+
+export interface CodexSessionReadOptions {
+  sessionsRoot?: string;
+  now?: Date;
+}
+
+export const CODEX_SESSION_TAIL_BYTES = 256 * 1024;
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null ? value as Record<string, unknown> : undefined;
@@ -262,134 +269,112 @@ export function extractCodexSessionMetrics(content: string): CodexSessionMetrics
   };
 }
 
-export function extractClaudeSessionMetrics(
-  content: string,
-  startedAtMs?: number
-): Omit<CodexSessionMetrics, 'modelProvider'> | undefined {
-  let model: string | undefined;
-  let inputTokens = 0;
-  let outputTokens = 0;
-  let sawMetrics = false;
+function codexSessionDateDirectories(sessionsRoot: string, now: Date): string[] {
+  return [0, 1].map((daysAgo) => {
+    const date = new Date(now);
+    date.setDate(date.getDate() - daysAgo);
 
-  for (const line of content.split('\n')) {
-    if (!line.trim()) continue;
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(line);
-    } catch {
-      continue;
-    }
-
-    const entry = asRecord(parsed);
-    if (!entry) continue;
-
-    const entryTimestamp = asString(entry.timestamp);
-    if (startedAtMs !== undefined && entryTimestamp) {
-      const entryTimeMs = Date.parse(entryTimestamp);
-      if (Number.isFinite(entryTimeMs) && entryTimeMs < startedAtMs) {
-        continue;
-      }
-    }
-
-    const message = asRecord(entry.message);
-    model = extractMetricModel(message) ?? model;
-
-    const usage = extractTokenUsage(message?.usage);
-    if (!usage) continue;
-
-    inputTokens += usage.inputTokens;
-    outputTokens += usage.outputTokens;
-    sawMetrics = true;
-  }
-
-  if (!model && !sawMetrics) {
-    return undefined;
-  }
-
-  return { model, inputTokens, outputTokens };
+    return join(
+      sessionsRoot,
+      String(date.getFullYear()),
+      String(date.getMonth() + 1).padStart(2, '0'),
+      String(date.getDate()).padStart(2, '0')
+    );
+  });
 }
 
-function findCodexSessionFile(
+export async function findCodexSessionFile(
   providerSessionId: string,
-  sessionsRoot = join(homedir(), '.codex', 'sessions')
-): string | undefined {
-  if (!existsSync(sessionsRoot)) {
-    return undefined;
-  }
-
-  const pending = [sessionsRoot];
-  while (pending.length > 0) {
-    const currentDir = pending.pop();
-    if (!currentDir) continue;
-
-    let entries: Array<{ name: string; isDirectory(): boolean; isFile(): boolean }>;
+  sessionsRoot = join(homedir(), '.codex', 'sessions'),
+  now = new Date()
+): Promise<string | undefined> {
+  for (const dateDirectory of codexSessionDateDirectories(sessionsRoot, now)) {
     try {
-      entries = readdirSync(currentDir, {
+      const entries = await readdir(dateDirectory, {
         withFileTypes: true,
         encoding: 'utf8',
-      }) as Array<{ name: string; isDirectory(): boolean; isFile(): boolean }>;
+      });
+
+      for (const entry of entries) {
+        if (
+          entry.isFile() &&
+          entry.name.startsWith('rollout-') &&
+          entry.name.endsWith(`-${providerSessionId}.jsonl`)
+        ) {
+          return join(dateDirectory, entry.name);
+        }
+      }
     } catch {
-      continue;
-    }
-
-    for (const entry of entries) {
-      const fullPath = join(currentDir, entry.name);
-      if (entry.isDirectory()) {
-        pending.push(fullPath);
-        continue;
-      }
-
-      if (entry.isFile() && entry.name.endsWith(`${providerSessionId}.jsonl`)) {
-        return fullPath;
-      }
+      // Missing or unreadable date directories simply mean there is no matching session here.
     }
   }
 
   return undefined;
 }
 
-function readCodexSessionMetrics(providerSessionId?: string): CodexSessionMetrics | undefined {
-  if (!providerSessionId) {
+async function readFileTail(filePath: string, maxBytes: number): Promise<string> {
+  const file = await open(filePath, 'r');
+
+  try {
+    const { size } = await file.stat();
+    const bytesToRead = Math.min(size, maxBytes);
+    if (bytesToRead === 0) {
+      return '';
+    }
+
+    const buffer = Buffer.allocUnsafe(bytesToRead);
+    const startPosition = size - bytesToRead;
+    let totalBytesRead = 0;
+
+    while (totalBytesRead < bytesToRead) {
+      const { bytesRead } = await file.read(
+        buffer,
+        totalBytesRead,
+        bytesToRead - totalBytesRead,
+        startPosition + totalBytesRead
+      );
+      if (bytesRead === 0) break;
+      totalBytesRead += bytesRead;
+    }
+
+    return buffer.subarray(0, totalBytesRead).toString('utf8');
+  } finally {
+    await file.close();
+  }
+}
+
+export async function readCodexSessionMetrics(
+  provider: string | undefined,
+  providerSessionId: string | undefined,
+  options: CodexSessionReadOptions = {}
+): Promise<CodexSessionMetrics | undefined> {
+  if (provider !== 'codex' || !providerSessionId) {
     return undefined;
   }
 
-  const sessionFile = findCodexSessionFile(providerSessionId);
+  const sessionFile = await findCodexSessionFile(
+    providerSessionId,
+    options.sessionsRoot,
+    options.now
+  );
   if (!sessionFile) {
     return undefined;
   }
 
   try {
-    return extractCodexSessionMetrics(readFileSync(sessionFile, 'utf8'));
-  } catch {
-    return undefined;
-  }
-}
+    const metrics = extractCodexSessionMetrics(
+      await readFileTail(sessionFile, CODEX_SESSION_TAIL_BYTES)
+    );
+    if (!metrics?.model && !metrics?.inputTokens && !metrics?.outputTokens) {
+      logger.warn(
+        `Codex session metrics file ${sessionFile} contained no usable model or token data`
+      );
+      return undefined;
+    }
 
-function readClaudeSessionMetrics(
-  providerSessionId: string | undefined,
-  workingDirectory: string,
-  startedAtMs: number
-): Omit<CodexSessionMetrics, 'modelProvider'> | undefined {
-  if (!providerSessionId) {
-    return undefined;
-  }
-
-  const projectDirectory = workingDirectory.replace(/[^a-zA-Z0-9-]/g, '-');
-  const sessionFile = join(
-    homedir(),
-    '.claude',
-    'projects',
-    projectDirectory,
-    `${providerSessionId}.jsonl`
-  );
-  if (!existsSync(sessionFile)) {
-    return undefined;
-  }
-
-  try {
-    return extractClaudeSessionMetrics(readFileSync(sessionFile, 'utf8'), startedAtMs);
-  } catch {
+    return metrics;
+  } catch (error) {
+    logger.warn(`Failed to read Codex session metrics file ${sessionFile}`, error);
     return undefined;
   }
 }
@@ -632,15 +617,11 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
 
       // Track metrics state for this session
       const sessionStartTime = Date.now();
-      const sessionMetricsStartTime = session.startedAt
-        ? new Date(session.startedAt).getTime()
-        : sessionStartTime;
       let metricsRecorded = false;
       let sessionOutcome: MetricOutcome = 'completed';
       let sessionInputTokens = 0;
       let sessionOutputTokens = 0;
       let sessionModel: string | undefined;
-      let sessionProviderSessionId = session.providerSessionId;
 
       // Listen for rate_limited events from sessions and forward to trackers
       const onRateLimited = (data: { executablePath?: string; resetsAt?: Date; message?: string }) => {
@@ -675,23 +656,18 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
           sessionAgentMetaPromise,
         ]);
         const provider = asString(agentMeta?.provider) ?? 'claude-code';
-        const sessionFileMetrics = provider === 'codex'
-          ? readCodexSessionMetrics(sessionProviderSessionId)
-          : provider === 'claude-code' || provider === 'claude'
-            ? readClaudeSessionMetrics(
-                sessionProviderSessionId,
-                session.workingDirectory,
-                sessionMetricsStartTime
-              )
-            : undefined;
+        const codexSessionMetrics = await readCodexSessionMetrics(
+          provider,
+          session.providerSessionId
+        );
         const model =
           sessionModel ??
-          sessionFileMetrics?.model ??
+          codexSessionMetrics?.model ??
           asString(agentMeta?.model);
 
-        if (sessionFileMetrics && (sessionFileMetrics.inputTokens > 0 || sessionFileMetrics.outputTokens > 0)) {
-          sessionInputTokens = sessionFileMetrics.inputTokens;
-          sessionOutputTokens = sessionFileMetrics.outputTokens;
+        if (codexSessionMetrics && (codexSessionMetrics.inputTokens > 0 || codexSessionMetrics.outputTokens > 0)) {
+          sessionInputTokens = codexSessionMetrics.inputTokens;
+          sessionOutputTokens = codexSessionMetrics.outputTokens;
         }
 
         const task = taskId
@@ -713,8 +689,6 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
       // Auto-terminate sessions when they emit a 'result' event
       // This handles ephemeral worker sessions completing their tasks
       const onSessionEvent = (event: SpawnedSessionEvent) => {
-        const raw = asRecord(event.raw);
-        sessionProviderSessionId = asString(raw?.session_id) ?? sessionProviderSessionId;
         sessionModel = extractMetricModel(event.raw) ?? sessionModel;
 
         const totals = accumulateMetricTokenUsage({
