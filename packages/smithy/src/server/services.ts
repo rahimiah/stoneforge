@@ -146,10 +146,10 @@ function extractTokenUsage(value: unknown): MetricTokenUsage | undefined {
   }
 
   return (
-    extractTokenUsage(record.last) ??
-    extractTokenUsage(record.last_token_usage) ??
     extractTokenUsage(record.total) ??
     extractTokenUsage(record.total_token_usage) ??
+    extractTokenUsage(record.last) ??
+    extractTokenUsage(record.last_token_usage) ??
     extractTokenUsage(record.info) ??
     extractTokenUsage(record.usage) ??
     extractTokenUsage(record.tokenUsage) ??
@@ -171,6 +171,39 @@ export function accumulateMetricTokenUsage(
     inputTokens: current.inputTokens + usage.inputTokens,
     outputTokens: current.outputTokens + usage.outputTokens,
   };
+}
+
+export function extractMetricModel(value: unknown): string | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+
+  const directModel = asString(record.model ?? record.modelID ?? record.model_id);
+  if (directModel) {
+    const providerId = asString(record.providerID ?? record.provider_id);
+    return providerId && !directModel.includes('/')
+      ? `${providerId}/${directModel}`
+      : directModel;
+  }
+
+  const modelRecord = asRecord(record.model);
+  const modelId = asString(modelRecord?.modelID ?? modelRecord?.model_id ?? modelRecord?.id);
+  if (modelId) {
+    const providerId = asString(modelRecord?.providerID ?? modelRecord?.provider_id);
+    return providerId && !modelId.includes('/') ? `${providerId}/${modelId}` : modelId;
+  }
+
+  const modelUsage = asRecord(record.modelUsage ?? record.model_usage);
+  if (modelUsage) {
+    const [model] = Object.keys(modelUsage);
+    if (model) return model;
+  }
+
+  return (
+    extractMetricModel(record.message) ??
+    extractMetricModel(record.info) ??
+    extractMetricModel(record.properties) ??
+    extractMetricModel(record.payload)
+  );
 }
 
 export function extractCodexSessionMetrics(content: string): CodexSessionMetrics | undefined {
@@ -368,6 +401,10 @@ export function deriveMetricOutcome(
   taskStatus: Task['status'] | undefined,
   sessionOutcome: MetricOutcome
 ): MetricOutcome {
+  if (sessionOutcome === 'failed' || sessionOutcome === 'rate_limited') {
+    return sessionOutcome;
+  }
+
   if (taskStatus === TaskStatus.OPEN || taskStatus === TaskStatus.DEFERRED) {
     return 'handoff';
   }
@@ -584,6 +621,7 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
       let sessionOutcome: MetricOutcome = 'completed';
       let sessionInputTokens = 0;
       let sessionOutputTokens = 0;
+      let sessionModel: string | undefined;
 
       // Listen for rate_limited events from sessions and forward to trackers
       const onRateLimited = (data: { executablePath?: string; resetsAt?: Date; message?: string }) => {
@@ -617,17 +655,13 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
           sessionTaskIdPromise,
           sessionAgentMetaPromise,
         ]);
-        const agentProvider = asString(agentMeta?.provider);
+        const provider = asString(agentMeta?.provider) ?? 'claude-code';
         const codexSessionMetrics = await readCodexSessionMetrics(
-          agentProvider,
+          provider,
           session.providerSessionId
         );
-
-        const provider =
-          agentProvider ??
-          codexSessionMetrics?.modelProvider ??
-          'unknown';
         const model =
+          sessionModel ??
           codexSessionMetrics?.model ??
           asString(agentMeta?.model);
 
@@ -655,6 +689,8 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
       // Auto-terminate sessions when they emit a 'result' event
       // This handles ephemeral worker sessions completing their tasks
       const onSessionEvent = (event: SpawnedSessionEvent) => {
+        sessionModel = extractMetricModel(event.raw) ?? sessionModel;
+
         const totals = accumulateMetricTokenUsage({
           inputTokens: sessionInputTokens,
           outputTokens: sessionOutputTokens,

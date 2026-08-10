@@ -8,6 +8,7 @@ import {
   CODEX_SESSION_TAIL_BYTES,
   deriveMetricOutcome,
   extractCodexSessionMetrics,
+  extractMetricModel,
   findCodexSessionFile,
   readCodexSessionMetrics,
 } from './services.js';
@@ -42,7 +43,7 @@ describe('server metrics helpers', () => {
     });
   });
 
-  test('extracts model and tokens from Codex session JSONL content', () => {
+  test('extracts cumulative model and token totals from Codex session JSONL content', () => {
     const metrics = extractCodexSessionMetrics([
       JSON.stringify({
         type: 'session_meta',
@@ -62,9 +63,13 @@ describe('server metrics helpers', () => {
         payload: {
           type: 'token_count',
           info: {
+            total_token_usage: {
+              input_tokens: 8796316,
+              output_tokens: 53817,
+            },
             last_token_usage: {
-              input_tokens: 17079,
-              output_tokens: 5,
+              input_tokens: 98821,
+              output_tokens: 1546,
             },
           },
         },
@@ -74,9 +79,23 @@ describe('server metrics helpers', () => {
     expect(metrics).toEqual({
       model: 'gpt-5.6-sol',
       modelProvider: 'openai',
-      inputTokens: 17079,
-      outputTokens: 5,
+      inputTokens: 8796316,
+      outputTokens: 53817,
     });
+  });
+
+  test('extracts models from provider init and result payloads', () => {
+    expect(extractMetricModel({
+      type: 'system',
+      subtype: 'init',
+      model: 'claude-sonnet-4-6',
+    })).toBe('claude-sonnet-4-6');
+    expect(extractMetricModel({
+      type: 'result',
+      modelUsage: {
+        'claude-opus-5': { inputTokens: 10, outputTokens: 2 },
+      },
+    })).toBe('claude-opus-5');
   });
 
   test('searches only today and yesterday date directories', async () => {
@@ -191,11 +210,12 @@ describe('server metrics helpers', () => {
 
   test('marks reopened tasks as handoff outcomes', () => {
     expect(deriveMetricOutcome(TaskStatus.OPEN, 'completed')).toBe('handoff');
-    expect(deriveMetricOutcome(TaskStatus.DEFERRED, 'failed')).toBe('handoff');
+    expect(deriveMetricOutcome(TaskStatus.DEFERRED, 'completed')).toBe('handoff');
   });
 
-  test('preserves rate_limited outcomes when task is not handed off', () => {
+  test('preserves rate_limited and failed outcomes before handoff state', () => {
     expect(deriveMetricOutcome(TaskStatus.IN_PROGRESS, 'rate_limited')).toBe('rate_limited');
-    expect(deriveMetricOutcome(undefined, 'rate_limited')).toBe('rate_limited');
+    expect(deriveMetricOutcome(TaskStatus.OPEN, 'rate_limited')).toBe('rate_limited');
+    expect(deriveMetricOutcome(TaskStatus.DEFERRED, 'failed')).toBe('failed');
   });
 });
