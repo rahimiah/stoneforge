@@ -117,6 +117,10 @@ export class CodexInteractiveProvider implements InteractiveProvider {
     // stoneforgeRoot, which points to the managed project, not the sf installation.
     const sfBinDir = resolve(__codexInteractiveDir, '../../bin');
     env.PATH = sfBinDir + ':' + (env.PATH ?? '');
+    // The `sf` launcher runs sf.js under this interpreter, rather than whatever
+    // Node the agent's login shell resolves (often outside the supported
+    // >=18 <25 range, which breaks every `sf task complete`).
+    env.STONEFORGE_NODE = process.execPath;
     // Remove CLAUDECODE to prevent nested-session errors when Stoneforge
     // itself runs inside Claude Code.
     delete env.CLAUDECODE;

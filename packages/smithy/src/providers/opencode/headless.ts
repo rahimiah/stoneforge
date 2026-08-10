@@ -45,6 +45,13 @@ class OpenCodeHeadlessSession implements HeadlessSession {
   private client: OpencodeClient;
   private sessionId: string;
   private model: ModelSpec | undefined;
+  /**
+   * Working directory for this session, sent as `?directory=` on every
+   * session-scoped request. The OpenCode server is a shared singleton across all
+   * sessions, so the directory cannot be set once at spawn time — it has to
+   * accompany each call, or every agent operates in the server's own cwd.
+   */
+  private directory: string | undefined;
   private eventMapper: OpenCodeEventMapper;
   private messageQueue: AsyncQueue<AgentMessage>;
   private closed = false;
@@ -53,11 +60,13 @@ class OpenCodeHeadlessSession implements HeadlessSession {
     client: OpencodeClient,
     sessionId: string,
     eventSubscription: AsyncIterable<unknown>,
-    model?: ModelSpec
+    model?: ModelSpec,
+    directory?: string
   ) {
     this.client = client;
     this.sessionId = sessionId;
     this.model = model;
+    this.directory = directory;
     this.eventMapper = new OpenCodeEventMapper();
     this.messageQueue = new AsyncQueue<AgentMessage>();
 
@@ -80,6 +89,7 @@ class OpenCodeHeadlessSession implements HeadlessSession {
     this.client.session
       .promptAsync({
         path: { id: this.sessionId },
+        ...(this.directory ? { query: { directory: this.directory } } : {}),
         body,
       })
       .catch((error) => {
@@ -96,7 +106,10 @@ class OpenCodeHeadlessSession implements HeadlessSession {
   }
 
   async interrupt(): Promise<void> {
-    await this.client.session.abort({ path: { id: this.sessionId } });
+    await this.client.session.abort({
+      path: { id: this.sessionId },
+      ...(this.directory ? { query: { directory: this.directory } } : {}),
+    });
   }
 
   close(): void {
@@ -188,12 +201,20 @@ export class OpenCodeHeadlessProvider implements HeadlessProvider {
 
     try {
       // 2. Create or resume session
+      // The shared server ignores any cwd given at startup, so the working
+      // directory must be sent per request or the agent operates in the
+      // Stoneforge server's own directory instead of its worktree.
+      const directoryQuery = options.workingDirectory
+        ? { query: { directory: options.workingDirectory } }
+        : {};
+
       if (options.resumeSessionId) {
         // Verify session exists (throws on 404)
-        await client.session.get({ path: { id: options.resumeSessionId } });
+        await client.session.get({ path: { id: options.resumeSessionId }, ...directoryQuery });
         sessionId = options.resumeSessionId;
       } else {
         const result = await client.session.create({
+          ...directoryQuery,
           body: { title: options.initialPrompt?.slice(0, 100) || 'Stoneforge Agent' },
         });
         if (!result.data?.id) {
@@ -206,7 +227,13 @@ export class OpenCodeHeadlessProvider implements HeadlessProvider {
       const { stream } = await client.event.subscribe();
 
       // 4. Create session object with model if provided
-      const headlessSession = new OpenCodeHeadlessSession(client, sessionId, stream, modelSpec);
+      const headlessSession = new OpenCodeHeadlessSession(
+        client,
+        sessionId,
+        stream,
+        modelSpec,
+        options.workingDirectory
+      );
 
       // 5. Synthesize system init message
       headlessSession.injectInitMessage();

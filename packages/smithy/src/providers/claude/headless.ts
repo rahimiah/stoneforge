@@ -346,6 +346,10 @@ export class ClaudeHeadlessProvider implements HeadlessProvider {
     // stoneforgeRoot, which points to the managed project, not the sf installation.
     const sfBinDir = resolve(__dirname, '../../bin');
     env.PATH = sfBinDir + ':' + (env.PATH ?? '');
+    // The `sf` launcher runs sf.js under this interpreter, rather than whatever
+    // Node the agent's login shell resolves (often outside the supported
+    // >=18 <25 range, which breaks every `sf task complete`).
+    env.STONEFORGE_NODE = process.execPath;
     // Remove CLAUDECODE to prevent "cannot be launched inside another Claude Code
     // session" error when the Stoneforge server itself runs inside Claude Code.
     delete env.CLAUDECODE;

@@ -39,6 +39,10 @@ export function applyOpenCodeEnv(stoneforgeRoot?: string): void {
   if (stoneforgeRoot) {
     process.env.STONEFORGE_ROOT = stoneforgeRoot;
   }
+  // The `sf` launcher runs sf.js under this interpreter. Without it, sf inherits
+  // whatever Node the agent's login shell resolves, which is often outside the
+  // supported range (>=18 <25) and breaks every `sf task complete`.
+  process.env.STONEFORGE_NODE = process.execPath;
 
   const currentPath = process.env.PATH ?? '';
   if (!currentPath.split(':').includes(SF_BIN_DIR)) {
@@ -150,6 +154,11 @@ const OPENCODE_DEFAULT_MODEL = 'opencode/minimax-m2.5-free';
 
 export interface ServerManagerConfig {
   port?: number;
+  /**
+   * Retained for call-site compatibility but NOT used to start the server: the
+   * SDK provides no way to set the server's working directory, and one shared
+   * server serves every session. Sessions carry their own directory per request.
+   */
   cwd?: string;
   stoneforgeRoot?: string;
 }
@@ -303,9 +312,13 @@ class OpenCodeServerManager {
     // reach the spawned server; there is no per-spawn env hook in this SDK version.
     applyOpenCodeEnv(config?.stoneforgeRoot);
 
+    // NOTE: `cwd` is deliberately NOT passed. The SDK's ServerOptions has no cwd
+    // field and would discard it, and the server is a shared singleton anyway, so
+    // a single startup directory could never be right for more than one session.
+    // Per-session working directories are sent as `?directory=` on each
+    // session-scoped request instead — see headless.ts.
     const result = await createOpencode({
       port: config?.port ?? 0,
-      cwd: config?.cwd,
     });
 
     // The SDK returns richer types; we extract what we need
