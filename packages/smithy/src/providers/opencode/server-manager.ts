@@ -8,6 +8,12 @@
  * @module
  */
 
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __opencodeFilename = fileURLToPath(import.meta.url);
+const __opencodeDir = dirname(__opencodeFilename);
+
 // ============================================================================
 // Internal Types (our interface into the SDK)
 // ============================================================================
@@ -265,6 +271,11 @@ class OpenCodeServerManager {
     if (config?.stoneforgeRoot) {
       env.STONEFORGE_ROOT = config.stoneforgeRoot;
     }
+    // Prepend the sf CLI binary directory to PATH so agents can run `sf` commands.
+    // Resolve from this module's location (dist/providers/opencode/) rather than
+    // stoneforgeRoot, which points to the managed project, not the sf installation.
+    const sfBinDir = resolve(__opencodeDir, '../../bin');
+    env.PATH = sfBinDir + ':' + (env.PATH ?? '');
 
     const result = await createOpencode({
       port: config?.port ?? 0,
