@@ -139,10 +139,10 @@ function extractTokenUsage(value: unknown): MetricTokenUsage | undefined {
   }
 
   return (
-    extractTokenUsage(record.last) ??
-    extractTokenUsage(record.last_token_usage) ??
     extractTokenUsage(record.total) ??
     extractTokenUsage(record.total_token_usage) ??
+    extractTokenUsage(record.last) ??
+    extractTokenUsage(record.last_token_usage) ??
     extractTokenUsage(record.info) ??
     extractTokenUsage(record.usage) ??
     extractTokenUsage(record.tokenUsage) ??
@@ -164,6 +164,39 @@ export function accumulateMetricTokenUsage(
     inputTokens: current.inputTokens + usage.inputTokens,
     outputTokens: current.outputTokens + usage.outputTokens,
   };
+}
+
+export function extractMetricModel(value: unknown): string | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+
+  const directModel = asString(record.model ?? record.modelID ?? record.model_id);
+  if (directModel) {
+    const providerId = asString(record.providerID ?? record.provider_id);
+    return providerId && !directModel.includes('/')
+      ? `${providerId}/${directModel}`
+      : directModel;
+  }
+
+  const modelRecord = asRecord(record.model);
+  const modelId = asString(modelRecord?.modelID ?? modelRecord?.model_id ?? modelRecord?.id);
+  if (modelId) {
+    const providerId = asString(modelRecord?.providerID ?? modelRecord?.provider_id);
+    return providerId && !modelId.includes('/') ? `${providerId}/${modelId}` : modelId;
+  }
+
+  const modelUsage = asRecord(record.modelUsage ?? record.model_usage);
+  if (modelUsage) {
+    const [model] = Object.keys(modelUsage);
+    if (model) return model;
+  }
+
+  return (
+    extractMetricModel(record.message) ??
+    extractMetricModel(record.info) ??
+    extractMetricModel(record.properties) ??
+    extractMetricModel(record.payload)
+  );
 }
 
 export function extractCodexSessionMetrics(content: string): CodexSessionMetrics | undefined {
@@ -229,6 +262,54 @@ export function extractCodexSessionMetrics(content: string): CodexSessionMetrics
   };
 }
 
+export function extractClaudeSessionMetrics(
+  content: string,
+  startedAtMs?: number
+): Omit<CodexSessionMetrics, 'modelProvider'> | undefined {
+  let model: string | undefined;
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let sawMetrics = false;
+
+  for (const line of content.split('\n')) {
+    if (!line.trim()) continue;
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      continue;
+    }
+
+    const entry = asRecord(parsed);
+    if (!entry) continue;
+
+    const entryTimestamp = asString(entry.timestamp);
+    if (startedAtMs !== undefined && entryTimestamp) {
+      const entryTimeMs = Date.parse(entryTimestamp);
+      if (Number.isFinite(entryTimeMs) && entryTimeMs < startedAtMs) {
+        continue;
+      }
+    }
+
+    const message = asRecord(entry.message);
+    model = extractMetricModel(message) ?? model;
+
+    const usage = extractTokenUsage(message?.usage);
+    if (!usage) continue;
+
+    inputTokens += usage.inputTokens;
+    outputTokens += usage.outputTokens;
+    sawMetrics = true;
+  }
+
+  if (!model && !sawMetrics) {
+    return undefined;
+  }
+
+  return { model, inputTokens, outputTokens };
+}
+
 function findCodexSessionFile(
   providerSessionId: string,
   sessionsRoot = join(homedir(), '.codex', 'sessions')
@@ -285,6 +366,34 @@ function readCodexSessionMetrics(providerSessionId?: string): CodexSessionMetric
   }
 }
 
+function readClaudeSessionMetrics(
+  providerSessionId: string | undefined,
+  workingDirectory: string,
+  startedAtMs: number
+): Omit<CodexSessionMetrics, 'modelProvider'> | undefined {
+  if (!providerSessionId) {
+    return undefined;
+  }
+
+  const projectDirectory = workingDirectory.replace(/[^a-zA-Z0-9-]/g, '-');
+  const sessionFile = join(
+    homedir(),
+    '.claude',
+    'projects',
+    projectDirectory,
+    `${providerSessionId}.jsonl`
+  );
+  if (!existsSync(sessionFile)) {
+    return undefined;
+  }
+
+  try {
+    return extractClaudeSessionMetrics(readFileSync(sessionFile, 'utf8'), startedAtMs);
+  } catch {
+    return undefined;
+  }
+}
+
 function isFailedResultEvent(event: SpawnedSessionEvent): boolean {
   if (typeof event.subtype === 'string' && event.subtype.startsWith('error')) {
     return true;
@@ -307,6 +416,10 @@ export function deriveMetricOutcome(
   taskStatus: Task['status'] | undefined,
   sessionOutcome: MetricOutcome
 ): MetricOutcome {
+  if (sessionOutcome === 'failed' || sessionOutcome === 'rate_limited') {
+    return sessionOutcome;
+  }
+
   if (taskStatus === TaskStatus.OPEN || taskStatus === TaskStatus.DEFERRED) {
     return 'handoff';
   }
@@ -519,10 +632,15 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
 
       // Track metrics state for this session
       const sessionStartTime = Date.now();
+      const sessionMetricsStartTime = session.startedAt
+        ? new Date(session.startedAt).getTime()
+        : sessionStartTime;
       let metricsRecorded = false;
       let sessionOutcome: MetricOutcome = 'completed';
       let sessionInputTokens = 0;
       let sessionOutputTokens = 0;
+      let sessionModel: string | undefined;
+      let sessionProviderSessionId = session.providerSessionId;
 
       // Listen for rate_limited events from sessions and forward to trackers
       const onRateLimited = (data: { executablePath?: string; resetsAt?: Date; message?: string }) => {
@@ -556,19 +674,24 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
           sessionTaskIdPromise,
           sessionAgentMetaPromise,
         ]);
-        const codexSessionMetrics = readCodexSessionMetrics(session.providerSessionId);
-
-        const provider =
-          asString(agentMeta?.provider) ??
-          codexSessionMetrics?.modelProvider ??
-          'unknown';
+        const provider = asString(agentMeta?.provider) ?? 'claude-code';
+        const sessionFileMetrics = provider === 'codex'
+          ? readCodexSessionMetrics(sessionProviderSessionId)
+          : provider === 'claude-code' || provider === 'claude'
+            ? readClaudeSessionMetrics(
+                sessionProviderSessionId,
+                session.workingDirectory,
+                sessionMetricsStartTime
+              )
+            : undefined;
         const model =
-          codexSessionMetrics?.model ??
+          sessionModel ??
+          sessionFileMetrics?.model ??
           asString(agentMeta?.model);
 
-        if (codexSessionMetrics && (codexSessionMetrics.inputTokens > 0 || codexSessionMetrics.outputTokens > 0)) {
-          sessionInputTokens = codexSessionMetrics.inputTokens;
-          sessionOutputTokens = codexSessionMetrics.outputTokens;
+        if (sessionFileMetrics && (sessionFileMetrics.inputTokens > 0 || sessionFileMetrics.outputTokens > 0)) {
+          sessionInputTokens = sessionFileMetrics.inputTokens;
+          sessionOutputTokens = sessionFileMetrics.outputTokens;
         }
 
         const task = taskId
@@ -590,6 +713,10 @@ export async function initializeServices(options: ServicesOptions = {}): Promise
       // Auto-terminate sessions when they emit a 'result' event
       // This handles ephemeral worker sessions completing their tasks
       const onSessionEvent = (event: SpawnedSessionEvent) => {
+        const raw = asRecord(event.raw);
+        sessionProviderSessionId = asString(raw?.session_id) ?? sessionProviderSessionId;
+        sessionModel = extractMetricModel(event.raw) ?? sessionModel;
+
         const totals = accumulateMetricTokenUsage({
           inputTokens: sessionInputTokens,
           outputTokens: sessionOutputTokens,
